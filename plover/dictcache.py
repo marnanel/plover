@@ -74,16 +74,19 @@ class DictionaryCache(_Cache):
         if result is None:
             return 0
         else:
+            # Add one: no slashes means one stroke, etc.
             return result+1
 
     def __iter__(self):
-        result = self._execute("""SELECT
-            (stroke, translation)
+        select = self._execute("""SELECT
+            stroke, translation
             FROM translations
-            WHERE dictionary=?""",
+            WHERE dictionary=?;""",
             self._primary_key)
 
-        for (k,v) in result.fetchone():
+        result = select.fetchall()
+
+        for (k,v) in result:
             yield (k,v)
 
     def __getitem__(self, key):

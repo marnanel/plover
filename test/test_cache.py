@@ -63,3 +63,21 @@ class CollectionCacheTestCase(unittest.TestCase):
                     ('TAR/ANT/UL/A', 'bigspider')])
  
             self.assertEqual(db.longest_key_length(), 4)
+
+    def test_iteration(self):
+
+        with CollectionCacheForTesting() as c:
+            db = c.get_dictionary('red', 1)
+
+            strokes = [
+                    ('FRED', 'fred'),
+                    ('JIM', 'jim'),
+                    ('SHEILA', 'sheila'),
+                    ]
+
+            db.update(strokes)
+
+            for (x, y) in zip(strokes, db):
+                self.assertEqual(x, y)
+
+
