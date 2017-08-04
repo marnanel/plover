@@ -1,6 +1,7 @@
 import sys
 import os
 import sqlite3
+from plover.steno_dictionary import StenoDictionary
 
 class _Cache(object):
 
@@ -35,11 +36,11 @@ class DictionaryCache(_Cache):
             primary_key,
             should_be_filled):
 
-        super()
+        _Cache.__init__(self)
 
         self._parent = collection_cache
         self._db = db
-        self._id = primary_key
+        self._primary_key = primary_key
         self._should_be_filled = should_be_filled
 
     def should_be_filled(self):
@@ -62,13 +63,18 @@ class DictionaryCache(_Cache):
         # from the length of the original key. It looks contrived,
         # but it lets us do the whole operation in sqlite.
 
-        result = self._execute("""SELECT
-            MAX(LENGTH(stroke)-LENGTH(REPLACE(stroke, '/', '')))+1
+        select = self._execute("""SELECT
+            MAX(LENGTH(stroke)-LENGTH(REPLACE(stroke, '/', '')))
             FROM translations
             WHERE dictionary=?;""",
             self._primary_key)
 
-        return result.fetchone()[0]
+        result = select.fetchone()[0]
+
+        if result is None:
+            return 0
+        else:
+            return result+1
 
     def __iter__(self):
         result = self._execute("""SELECT
@@ -101,7 +107,7 @@ class DictionaryCache(_Cache):
                 # XXX there is almost certainly a better way
                 # XXX to do bulk inserts
                 self._execute("""INSERT OR REPLACE INTO
-                translations(stroke,translation)
+                translations(dictionary,stroke,translation)
                 VALUES (?,?,?)""",
                     self._primary_key,
                     stroke, translation,
@@ -252,7 +258,7 @@ class CollectionCache(_Cache):
             VALUES (?,?)""", filename, timestamp,
             do_commit = False)
 
-        dictionary_id = cursor.lastrowid
+        dictionary_id = self._cursor.lastrowid
 
         self._commit()
 
