@@ -95,9 +95,6 @@ class CollectionCacheTestCase(unittest.TestCase):
             self.assertEqual(db['FRED'],'fred')
             self.assertRaises(db['HAZEL'], ValueError)
             
-            # XXX how does pytest assert about exceptions?
-            # We need to test for failure here as well.
-
             self.assertEqual(db.get('SHEILA'), 'sheila')
             self.assertEqual(db.get('JIM'),'jim')
             self.assertEqual(db.get('HAZEL'), None)
