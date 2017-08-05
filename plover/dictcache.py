@@ -257,15 +257,18 @@ class CollectionCache(_Cache):
         If the named file is not already in the cache, then a new
         handle will be generated. This will also store the filename
         and timestamp in the database so we know whether to reuse
-        the cache next time.
+        the cache next time. The DictionaryCache will be empty
+        and have its should_be_filled flag set.
 
         If the named file is already in the cache, AND if the datestamp
-        matches the datestamp given last time, then the handle will be
-        the same integer as last time.
+        matches the datestamp given last time, then the DictionaryCache
+        will contain the same data as last time. Its should_be_filled
+        flag will not be set.
 
         If the named file is already in the cache, but the
-        datestamp differs, then the previous cache will be erased
-        and a new cache handle will be generated.
+        datestamp differs, then the previous cache will be erased.
+        The DictionaryCache will be empty and have its should_be_filled
+        flag set.
         """
 
         previous = self._execute("""SELECT id, timestamp
@@ -276,7 +279,7 @@ class CollectionCache(_Cache):
 
             changed = previous[1]!=timestamp
             if changed:
-                self._execute("""DELETE * FROM translations
+                self._execute("""DELETE FROM translations
                     WHERE dictionary=?""", previous[0])
 
             return DictionaryCache(

@@ -17,8 +17,12 @@ THREESOME = {
         'SHEILA': 'sheila',
         }
 
+STANDARD_DB_NAME = 'fred-jim-sheila'
+STANDARD_DB_TIMESTAMP = 177
+
 def standard_db(c):
-    db = c.get_dictionary('fred-jim-sheila', 1)
+    db = c.get_dictionary(STANDARD_DB_NAME,
+            STANDARD_DB_TIMESTAMP)
     db.update(THREESOME.items())
 
     return db
@@ -37,6 +41,39 @@ class CollectionCacheForTesting(object):
         os.rmdir(self.dirname)
 
 class CollectionCacheTestCase(unittest.TestCase):
+
+    def test_shouldbefilled(self):
+        with CollectionCacheForTesting() as c:
+
+            for case in [
+                    { 
+                        'db2name': STANDARD_DB_NAME,
+                        'db2timestamp': STANDARD_DB_TIMESTAMP,
+                        'expectedSBF': False,
+                        'expectedLength': 3,
+                    },
+                    { 
+                        'db2name': 'not-'+STANDARD_DB_NAME,
+                        'db2timestamp': STANDARD_DB_TIMESTAMP,
+                        'expectedSBF': True,
+                        'expectedLength': 0,
+                    },
+                    { 
+                        'db2name': STANDARD_DB_NAME,
+                        'db2timestamp': STANDARD_DB_TIMESTAMP+1,
+                        'expectedSBF': True,
+                        'expectedLength': 0,
+                    },
+                    ]:
+                db1 = standard_db(c)
+
+                db2 = c.get_dictionary(case['db2name'],
+                        case['db2timestamp'])
+
+                self.assertEqual(db2.should_be_filled(),
+                        case['expectedSBF'])
+                self.assertEqual(len(db2),
+                        case['expectedLength'])
 
     def test_length(self):
 
