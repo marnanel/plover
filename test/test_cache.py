@@ -93,7 +93,9 @@ class CollectionCacheTestCase(unittest.TestCase):
 
             self.assertEqual(db['SHEILA'], 'sheila')
             self.assertEqual(db['FRED'],'fred')
-            self.assertRaises(db['HAZEL'], ValueError)
+
+            with self.assertRaises(ValueError):
+               db['HAZEL']
             
             self.assertEqual(db.get('SHEILA'), 'sheila')
             self.assertEqual(db.get('JIM'),'jim')
@@ -156,4 +158,29 @@ class CollectionCacheTestCase(unittest.TestCase):
             for name in ('HAZEL', 'JEREMY', 'PARVINDER'):
                 self.assertFalse(name in db)
 
+    def test_reverselookup(self):
+        with CollectionCacheForTesting() as c:
+            db = standard_db(c)
 
+            db['SHEILA'] = 'mary'
+            db['MARIGOLD'] = 'mary'
+            db['MARYANNE'] = 'mArY'
+
+            for (value, expectRL, expectCRL) in [
+                    ('fred', ['FRED'], ['FRED']),
+                    ('jim', ['JIM'], ['JIM']),
+                    ('mary', ['SHEILA', 'MARIGOLD'],
+                        ['SHEILA', 'MARIGOLD', 'MARYANNE']),
+                    ]:
+                
+                self.assertListEqual(sorted(db.reverse_lookup(value)),
+                    sorted(expectRL))
+
+                self.assertListEqual(sorted(db.casereverse_lookup(value)),
+                    sorted(expectCRL))
+
+            with self.assertRaises(KeyError):
+                db.reverse_lookup('sheila')
+
+            with self.assertRaises(KeyError):
+                db.casereverse_lookup('sheila')

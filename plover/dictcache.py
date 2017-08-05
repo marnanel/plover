@@ -181,14 +181,14 @@ class DictionaryCache(_Cache):
             WHERE dictionary=?
             AND translation=?;""",
             self._primary_key,
-            translation).fetchone()
+            translation).fetchall()
 
-        if result is None:
+        if len(result)==0:
             raise KeyError()
 
-        return result[0].fetchall()
+        return [x[0] for x in result]
 
-    def casereverse_lookup(self, value):
+    def casereverse_lookup(self, translation):
         result = self._execute("""SELECT
             stroke
             FROM translations
@@ -198,7 +198,10 @@ class DictionaryCache(_Cache):
             self._primary_key,
             translation).fetchall()
 
-        return result
+        if len(result)==0:
+            raise KeyError()
+
+        return [x[0] for x in result]
 
 class CollectionCache(_Cache):
     def __init__(self,
