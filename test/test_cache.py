@@ -145,3 +145,15 @@ class CollectionCacheTestCase(unittest.TestCase):
                 self.assertEqual(db.get(delendum), None)
 
                 db.clear()
+
+    def test_contains(self):
+        with CollectionCacheForTesting() as c:
+            db = standard_db(c)
+
+            for name in ('FRED', 'JIM', 'SHEILA'):
+                self.assertTrue(name in db)
+
+            for name in ('HAZEL', 'JEREMY', 'PARVINDER'):
+                self.assertFalse(name in db)
+
+
