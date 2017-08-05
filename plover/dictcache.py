@@ -15,7 +15,6 @@ class _Cache(object):
         if self._cursor is None:
             self._cursor = self._db.cursor()
 
-        sys.stderr.write("%s\n%s\n" % (command, str(args)))
         result = self._cursor.execute(command, args)
 
         if do_commit:
@@ -140,7 +139,6 @@ class DictionaryCache(_Cache):
                 do_commit=do_commit)
 
         q=self._execute("""SELECT * FROM translations""")
-        sys.stderr.write(repr(q.fetchall()))
 
     def get(self, stroke, fallback=None):
         select = self._execute("""SELECT
