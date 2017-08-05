@@ -150,12 +150,12 @@ class DictionaryCache(_Cache):
             AND dictionary=?""",
             stroke, self._primary_key)
 
-        result = select.fetchone()[0]
+        result = select.fetchone()
 
         if result is None:
             return fallback
         else:
-            return result
+            return result[0]
 
     def __delitem__(self, key):
         self._execute("""DELETE

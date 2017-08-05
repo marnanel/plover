@@ -11,7 +11,19 @@ import sys
 
 from plover.dictcache import CollectionCache
 
-class CollectionCacheForTesting():
+THREESOME = {
+        'FRED': 'fred',
+        'JIM': 'jim',
+        'SHEILA': 'sheila',
+        }
+
+def standard_db(c):
+    db = c.get_dictionary('fred-jim-sheila', 1)
+    db.update(THREESOME.items())
+
+    return db
+
+class CollectionCacheForTesting(object):
 
     def __enter__(self):
         self.dirname = tempfile.mkdtemp(suffix='dictcache')
@@ -29,6 +41,7 @@ class CollectionCacheTestCase(unittest.TestCase):
     def test_length(self):
 
         with CollectionCacheForTesting() as c:
+            db = standard_db(c)
             db = c.get_dictionary('red', 1)
 
             db.update([
@@ -67,29 +80,16 @@ class CollectionCacheTestCase(unittest.TestCase):
     def test_iteration(self):
 
         with CollectionCacheForTesting() as c:
+            db = standard_db(c)
             db = c.get_dictionary('red', 1)
 
-            strokes = [
-                    ('FRED', 'fred'),
-                    ('JIM', 'jim'),
-                    ('SHEILA', 'sheila'),
-                    ]
-
-            db.update(strokes)
-
-            for (x, y) in zip(strokes, db):
+            for (x, y) in zip(THREESOME, db):
                 self.assertEqual(x, y)
 
     def test_getitem(self):
 
         with CollectionCacheForTesting() as c:
-            db = c.get_dictionary('red', 1)
-
-            db.update([
-                    ('FRED', 'fred'),
-                    ('JIM', 'jim'),
-                    ('SHEILA', 'sheila'),
-                    ])
+            db = standard_db(c)
 
             self.assertEqual(db['SHEILA'], 'sheila')
             self.assertEqual(db['FRED'],'fred')
@@ -103,13 +103,7 @@ class CollectionCacheTestCase(unittest.TestCase):
     def test_clear(self):
 
         with CollectionCacheForTesting() as c:
-            db = c.get_dictionary('red', 1)
-
-            db.update([
-                    ('FRED', 'fred'),
-                    ('JIM', 'jim'),
-                    ('SHEILA', 'sheila'),
-                    ])
+            db = standard_db(c)
 
             self.assertEqual(len(db), 3)
 
@@ -120,13 +114,7 @@ class CollectionCacheTestCase(unittest.TestCase):
     def test_getitem(self):
 
         with CollectionCacheForTesting() as c:
-            db = c.get_dictionary('red', 1)
-
-            db.update([
-                    ('FRED', 'fred'),
-                    ('JIM', 'jim'),
-                    ('SHEILA', 'sheila'),
-                    ])
+            db = standard_db(c)
 
             self.assertEqual(db['FRED'],'fred')
             self.assertEqual(db['JIM'],'jim')
@@ -137,4 +125,23 @@ class CollectionCacheTestCase(unittest.TestCase):
             self.assertEqual(db['FRED'],'fred')
             self.assertEqual(db['JIM'],'jim')
             self.assertEqual(db['SHEILA'], 'mavis')
- 
+
+    def test_delitem(self):
+
+        with CollectionCacheForTesting() as c:
+
+            for delendum in ['FRED', 'JIM', 'SHEILA']:
+                db = standard_db(c)
+
+                self.assertEqual(db.get('FRED'), 'fred')
+                self.assertEqual(db.get('JIM'), 'jim')
+                self.assertEqual(db.get('SHEILA'), 'sheila')
+            
+                del db[delendum]
+
+                for survivor in [x for x in THREESOME.keys() if x!=delendum]:
+                    self.assertEqual(db.get(survivor), THREESOME[survivor])
+
+                self.assertEqual(db.get(delendum), None)
+
+                db.clear()
