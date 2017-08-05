@@ -95,6 +95,8 @@ class DictionaryCache(_Cache):
         if result is None:
             raise KeyError()
 
+        return result
+
     def clear(self):
         self._execute("""DELETE
             FROM translations
@@ -126,17 +128,19 @@ class DictionaryCache(_Cache):
                 stroke, translation)
 
     def get(self, stroke, fallback=None):
-        result = self._execute("""SELECT
+        select = self._execute("""SELECT
             translation
             FROM translations
             WHERE stroke=?
             AND dictionary=?""",
-            self._primary_key, stroke)
+            stroke, self._primary_key)
+
+        result = select.fetchone()[0]
 
         if result is None:
             return fallback
-
-        return result.fetchone()[0]
+        else:
+            return result
 
     def __delitem__(self, key):
         self._execute("""DELETE

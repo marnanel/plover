@@ -80,4 +80,19 @@ class CollectionCacheTestCase(unittest.TestCase):
             for (x, y) in zip(strokes, db):
                 self.assertEqual(x, y)
 
+    def test_getitem(self):
+
+        with CollectionCacheForTesting() as c:
+            db = c.get_dictionary('red', 1)
+
+            db.update([
+                    ('FRED', 'fred'),
+                    ('JIM', 'jim'),
+                    ('SHEILA', 'sheila'),
+                    ])
+
+            self.assertEqual(db['SHEILA'], 'sheila')
+            self.assertEqual(db['FRED'],'fred')
+            
+            # XXX how does pytest assert about exceptions?
 
