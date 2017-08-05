@@ -117,3 +117,24 @@ class CollectionCacheTestCase(unittest.TestCase):
 
             self.assertEqual(len(db), 0)
 
+    def test_getitem(self):
+
+        with CollectionCacheForTesting() as c:
+            db = c.get_dictionary('red', 1)
+
+            db.update([
+                    ('FRED', 'fred'),
+                    ('JIM', 'jim'),
+                    ('SHEILA', 'sheila'),
+                    ])
+
+            self.assertEqual(db['FRED'],'fred')
+            self.assertEqual(db['JIM'],'jim')
+            self.assertEqual(db['SHEILA'], 'sheila')
+            
+            db['SHEILA'] = 'mavis'
+
+            self.assertEqual(db['FRED'],'fred')
+            self.assertEqual(db['JIM'],'jim')
+            self.assertEqual(db['SHEILA'], 'mavis')
+ 

@@ -111,21 +111,36 @@ class DictionaryCache(_Cache):
             for stroke, translation in iterable:
                 # XXX there is almost certainly a better way
                 # XXX to do bulk inserts
-                self._execute("""INSERT OR REPLACE INTO
-                translations(dictionary,stroke,translation)
-                VALUES (?,?,?)""",
-                    self._primary_key,
-                    stroke, translation,
-                    do_commit = False)
+                self.__setitem__(stroke, translation,
+                        do_commit=False)
 
         self._commit()
 
-    def __setitem__(self, stroke, translation):
-        self._execute("""INSERT OR REPLACE INTO
-            translations(stroke,translation)
+    def __setitem__(self, stroke, translation, do_commit=False):
+
+        # This isn't as inefficient as it looks.
+
+        # in case it exists
+        self._execute("""UPDATE
+            translations
+            SET translation=?
+            WHERE dictionary=? AND stroke=?""",
+                translation,
+                self._primary_key,
+                stroke,
+                do_commit=False)
+
+        # in case it doesn't exist
+        self._execute("""INSERT OR IGNORE INTO
+            translations
+            (dictionary, stroke, translation)
             VALUES (?,?,?)""",
                 self._primary_key,
-                stroke, translation)
+                stroke, translation,
+                do_commit=do_commit)
+
+        q=self._execute("""SELECT * FROM translations""")
+        sys.stderr.write(repr(q.fetchall()))
 
     def get(self, stroke, fallback=None):
         select = self._execute("""SELECT
@@ -206,20 +221,26 @@ class CollectionCache(_Cache):
                     dictionary
                     (id INTEGER PRIMARY KEY,
                     filename TEXT,
-                    timestamp NUM)
+                    timestamp NUM);
                     """,
 
                 """CREATE UNIQUE INDEX IF NOT EXISTS
                     dictfilename
-                    ON dictionary(filename)
+                    ON dictionary(filename);
                     """,
 
                 """CREATE TABLE IF NOT EXISTS
                     translations
                     (dictionary NUM,
                     stroke TEXT,
-                    translation TEXT)
+                    translation TEXT);
                     """,
+
+                """CREATE UNIQUE INDEX IF NOT EXISTS
+                    translationsidx
+                    ON translations(dictionary, stroke);
+                    """,
+
                 ]
 
         for command in COMMANDS:
