@@ -14,8 +14,15 @@ is_deployment()
   fi
 }
 
+setenv()
+{
+  # Fix path to to python-config.
+  run_eval "export PATH=\"/opt/python/$TRAVIS_PYTHON_VERSION/bin:\$PATH\""
+}
+
 setup()
 {
+  setenv
   # Install system dependencies.
   builddeps=(
     # dbus-python:
@@ -40,6 +47,8 @@ setup()
       libsqlite3-dev
       libssl-dev
       zlib1g-dev
+      # PyQt5:
+      libgl1-mesa-glx
       # wmctrl:
       libx11-dev
       libxmu-dev
@@ -52,6 +61,7 @@ setup()
 
 build()
 {
+  setenv
   run git fetch --quiet --unshallow
   run "$python" setup.py patch_version
   run "$python" setup.py test
@@ -60,16 +70,21 @@ build()
   # Note: if we moved this to the `before_deploy` phase, we would
   # not have to check, but we'd also lose caching; since the cache
   # is stored before the `before_install` phase...
-  if ! is_deployment
+  if is_deployment
   then
-    return
+    # Create wheel and source distribution.
+    run "$python" setup.py bdist_wheel sdist
+    # Build AppImage.
+    run ./linux/appimage/build.sh -c -j 2 -w dist/*.whl
+    run rm -rf .cache/pip
+  elif [ "$TRAVIS_PYTHON_VERSION" == '3.5' ]
+  then
+    # Otherwise, install plugins, and check requirements.
+    run "$python" setup.py bdist_wheel
+    wheels_install --ignore-installed --no-deps dist/*.whl
+    wheels_install -r requirements_plugins.txt
+    run "$python" -m utils.check_requirements
   fi
-
-  # Create wheel and source distribution.
-  run "$python" setup.py bdist_wheel sdist
-  # Build AppImage.
-  run ./linux/appimage/build.sh -c -j 2 -w dist/*.whl
-  run rm -rf .cache/pip
 }
 
 [ "$TRAVIS_OS_NAME" == 'linux' ]
