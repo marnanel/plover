@@ -9,15 +9,15 @@ class _Cache(object):
         self._db = None
         self._cursor = None
 
-    def _execute(self, command, *args,
-            do_commit = True):
+    def _execute(self, command,
+            *args, **kwargs):
 
         if self._cursor is None:
             self._cursor = self._db.cursor()
 
         result = self._cursor.execute(command, args)
 
-        if do_commit:
+        if kwargs.get("do_commit", True):
             self._db.commit()
             self._cursor = None
 
