@@ -12,7 +12,7 @@ import os
 import shutil
 
 from plover.resource import ASSET_SCHEME, resource_filename, resource_timestamp
-
+from plover.oslayer.config import CACHE_DIR
 
 class StenoDictionary(object):
     """A steno dictionary.
