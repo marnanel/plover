@@ -24,8 +24,10 @@ else:
 # files in a portable drive.
 if os.path.isfile(os.path.join(PROGRAM_DIR, 'plover.cfg')):
     CONFIG_DIR = PROGRAM_DIR
+    CACHE_DIR = PROGRAM_DIR
 else:
     CONFIG_DIR = appdirs.user_data_dir('plover', 'plover')
+    CACHE_DIR = appdirs.user_cache_dir('plover', 'plover')
 
 # Setup plugins directory.
 if sys.platform.startswith('darwin'):
