@@ -1,7 +1,6 @@
 import sys
 import os
 import sqlite3
-from plover.steno_dictionary import StenoDictionary
 
 class _Cache(object):
 
@@ -104,8 +103,6 @@ class DictionaryCache(_Cache):
 
     def update(self, *args, **kwargs):
         for iterable in args + (kwargs,):
-            if isinstance(iterable, (dict, StenoDictionary)):
-                iterable = iterable.items()
 
             for stroke, translation in iterable:
                 # XXX there is almost certainly a better way
