@@ -13,6 +13,15 @@ import shutil
 
 from plover.resource import ASSET_SCHEME, resource_filename, resource_timestamp
 from plover.oslayer.config import CACHE_DIR
+from plover.dictcache import CollectionCache
+
+collection_cache = None
+
+def get_collection_cache():
+    if collection_cache is None:
+        pass
+
+    return collection_cache
 
 class StenoDictionary(object):
     """A steno dictionary.
@@ -25,6 +34,7 @@ class StenoDictionary(object):
     timestamp -- File last modification time, used to detect external changes.
 
     """
+
     def __init__(self):
         self._dict = {}
         self._longest_key_length = 0
