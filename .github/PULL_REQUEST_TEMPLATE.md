@@ -1,27 +1,12 @@
-The following fields can give you some guidance on formatting your
-pull request. Not all fields are relevant for all pulls. Please
-fill in fields that you think are useful; brevity and clarity are
-valued.
+<!-- First time contributors: Take a moment to review https://github.com/openstenoproject/plover/blob/master/doc/developer_guide.md! -->
+<!-- Remove sections if not applicable -->
 
------
+## Summary of changes
 
-### About
+<!-- Summary goes here -->
 
-Briefly describe what you did, if you need to include technical details, start here.
+Closes <!-- issue number here -->
 
-### Issues
-
-Fixes #012
-
-### Reason
-
-If this change doesn't fix an issue, it would be good to give some background as to why this change is necessary.
-
-### Release Notes
-
-Include possible release notes/documentation, if applicable.
-
-### Tested Platforms
-
-Please include what you tested on, and if there needs to be testing on other OS's.
-
+### Pull Request Checklist
+- [ ] Changes have tests
+- [ ] News fragment added in news.d. See [documentation](https://github.com/openstenoproject/plover/blob/master/doc/developer_guide.md#making-a-pull-request) for details

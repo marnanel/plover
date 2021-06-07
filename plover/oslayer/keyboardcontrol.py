@@ -16,19 +16,16 @@ emulate keyboard input.
 
 """
 
-# Python 2/3 compatibility.
-from __future__ import print_function
-
-import sys
+from plover.oslayer.config import PLATFORM
 
 KEYBOARDCONTROL_NOT_FOUND_FOR_OS = \
-        "No keyboard control module was found for os %s" % sys.platform
+        "No keyboard control module was found for platform: %s" % PLATFORM
 
-if sys.platform.startswith('linux'):
+if PLATFORM in {'linux', 'bsd'}:
     from plover.oslayer import xkeyboardcontrol as keyboardcontrol
-elif sys.platform.startswith('win32'):
+elif PLATFORM == 'win':
     from plover.oslayer import winkeyboardcontrol as keyboardcontrol
-elif sys.platform.startswith('darwin'):
+elif PLATFORM == 'mac':
     from plover.oslayer import osxkeyboardcontrol as keyboardcontrol
 else:
     raise Exception(KEYBOARDCONTROL_NOT_FOUND_FOR_OS)
@@ -63,23 +60,23 @@ if __name__ == '__main__':
     ke = KeyboardEmulation()
 
     pressed = set()
-    status = u'pressed: '
+    status = 'pressed: '
 
     def test(key, action):
         global status
         print(key, action)
-        if u'pressed' == action:
+        if 'pressed' == action:
             pressed.add(key)
         elif key in pressed:
             pressed.remove(key)
-        new_status = u'pressed: ' + u'+'.join(pressed)
+        new_status = 'pressed: ' + '+'.join(pressed)
         if status != new_status:
             ke.send_backspaces(len(status))
             ke.send_string(new_status)
             status = new_status
 
-    kc.key_down = lambda k: test(k, u'pressed')
-    kc.key_up = lambda k: test(k, u'released')
+    kc.key_down = lambda k: test(k, 'pressed')
+    kc.key_up = lambda k: test(k, 'released')
     kc.suppress_keyboard(KeyboardCapture.SUPPORTED_KEYS)
     kc.start()
     print('Press CTRL-c to quit.')

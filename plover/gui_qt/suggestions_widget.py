@@ -5,6 +5,7 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtWidgets import QWidget
 
+from plover import _
 from plover.translation import escape_translation
 
 from plover.gui_qt.suggestions_widget_ui import Ui_SuggestionsWidget
@@ -20,8 +21,8 @@ class SuggestionsWidget(QWidget, Ui_SuggestionsWidget):
     #   - 1+ "translation" blocks
     #    - 1-10 "strokes" blocks
 
-    def __init__(self):
-        super(SuggestionsWidget, self).__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.setupUi(self)
         self._translation_char_format = QTextCharFormat()
         self._strokes_char_format = QTextCharFormat()
@@ -36,15 +37,16 @@ class SuggestionsWidget(QWidget, Ui_SuggestionsWidget):
             cursor.insertBlock()
             cursor.setCharFormat(self._translation_char_format)
             cursor.block().setUserState(self.STYLE_TRANSLATION)
-            cursor.insertText(escape_translation(suggestion.text) + u':')
+            cursor.insertText(escape_translation(suggestion.text) + ':')
             if not suggestion.steno_list:
-                cursor.insertText(u' ' + _('no suggestions'))
+                # i18n: Widget: “SuggestionsWidget”.
+                cursor.insertText(' ' + _('no suggestions'))
                 continue
             for strokes_list in suggestion.steno_list[:10]:
                 cursor.insertBlock()
                 cursor.setCharFormat(self._strokes_char_format)
                 cursor.block().setUserState(self.STYLE_STROKES)
-                cursor.insertText(u'   ' + u'/'.join(strokes_list))
+                cursor.insertText('   ' + '/'.join(strokes_list))
         cursor.insertText('\n')
         # Keep current position when not at the end of the document.
         if scroll_at_end:

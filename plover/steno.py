@@ -40,14 +40,20 @@ def normalize_stroke(stroke):
 
 def normalize_steno(strokes_string):
     """Convert steno strings to one common form."""
+    if not strokes_string:
+        return ()
     return tuple(normalize_stroke(stroke) for stroke
                  in strokes_string.split(STROKE_DELIMITER))
 
 def sort_steno_keys(steno_keys):
     return sorted(steno_keys, key=lambda x: system.KEY_ORDER.get(x, -1))
 
+def sort_steno_strokes(strokes_list):
+    '''Return suggestions, sorted by fewest strokes, then fewest keys.'''
+    return sorted(strokes_list, key=lambda x: (len(x), sum(map(len, x))))
 
-class Stroke(object):
+
+class Stroke:
     """A standardized data model for stenotype machine strokes.
 
     This class standardizes the representation of a stenotype chord. A stenotype
@@ -71,6 +77,10 @@ class Stroke(object):
         # Remove duplicate keys and save local versions of the input 
         # parameters.
         steno_keys_set = set(steno_keys)
+        if not steno_keys_set:
+            self.steno_keys = []
+            self.rtfcre = ''
+            return
         # Order the steno keys so comparisons can be made.
         steno_keys = list(sort_steno_keys(steno_keys_set))
 
@@ -80,10 +90,13 @@ class Stroke(object):
             for i, e in enumerate(steno_keys):
                 if e in system.NUMBERS:
                     steno_keys[i] = system.NUMBERS[e]
+                    steno_keys_set.remove(e)
+                    steno_keys_set.add(steno_keys[i])
                     numeral = True
             if numeral:
                 steno_keys.remove(system.NUMBER_KEY)
-        
+                steno_keys_set.remove(system.NUMBER_KEY)
+
         if steno_keys_set & system.IMPLICIT_HYPHEN_KEYS:
             self.rtfcre = ''.join(key.strip('-') for key in steno_keys)
         else:
@@ -96,6 +109,9 @@ class Stroke(object):
 
         # Determine if this stroke is a correction stroke.
         self.is_correction = (self.rtfcre == system.UNDO_STROKE_STENO)
+
+    def __hash__(self):
+        return hash(self.rtfcre)
 
     def __str__(self):
         if self.is_correction:

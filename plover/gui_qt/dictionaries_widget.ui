@@ -17,7 +17,7 @@
    </sizepolicy>
   </property>
   <property name="windowTitle">
-   <string>Form</string>
+   <string notr="true"/>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="leftMargin">
@@ -66,7 +66,7 @@
      </attribute>
      <column>
       <property name="text">
-       <string>Dictionary</string>
+       <string>Dictionaries</string>
       </property>
      </column>
     </widget>
@@ -85,6 +85,21 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+E</string>
+   </property>
+  </action>
+  <action name="action_SaveDictionaries">
+   <property name="icon">
+    <iconset resource="resources/resources.qrc">
+     <normaloff>:/save.svg</normaloff>:/save.svg</iconset>
+   </property>
+   <property name="text">
+    <string>&amp;Save dictionaries as...</string>
+   </property>
+   <property name="toolTip">
+    <string>Save the selected dictionaries: create a new copy of each dictionary, or merge them into a new dictionary.</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+S</string>
    </property>
   </action>
   <action name="action_RemoveDictionaries">
@@ -321,6 +336,22 @@
     </hint>
    </hints>
   </connection>
+  <connection>
+   <sender>table</sender>
+   <signal>itemChanged()</signal>
+   <receiver>DictionariesWidget</receiver>
+   <slot>on_dictionary_changed(QTableWidgetItem*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>182</x>
+     <y>118</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>182</x>
+     <y>118</y>
+    </hint>
+   </hints>
+  </connection>
  </connections>
  <slots>
   <slot>on_selection_changed()</slot>
@@ -332,5 +363,6 @@
   <slot>on_activate_cell(int,int)</slot>
   <slot>on_move_dictionaries_up()</slot>
   <slot>on_move_dictionaries_down()</slot>
+  <slot>on_dictionary_changed(QTableWidgetItem*)</slot>
  </slots>
 </ui>

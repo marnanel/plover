@@ -1,14 +1,11 @@
-
-import sys
-
 from PyQt5.QtCore import (
-    QCoreApplication,
     QThread,
     QVariant,
     pyqtSignal,
 )
 
 from plover.engine import StenoEngine
+from plover.oslayer.config import PLATFORM
 
 
 class Engine(StenoEngine, QThread):
@@ -19,6 +16,7 @@ class Engine(StenoEngine, QThread):
     signal_machine_state_changed = pyqtSignal(str, str)
     signal_output_changed = pyqtSignal(bool)
     signal_config_changed = pyqtSignal(QVariant)
+    signal_dictionaries_loaded = pyqtSignal(QVariant)
     signal_send_string = pyqtSignal(str)
     signal_send_backspaces = pyqtSignal(int)
     signal_send_key_combination = pyqtSignal(str)
@@ -26,12 +24,12 @@ class Engine(StenoEngine, QThread):
     signal_focus = pyqtSignal()
     signal_configure = pyqtSignal()
     signal_lookup = pyqtSignal()
+    signal_suggestions = pyqtSignal()
     signal_quit = pyqtSignal()
 
-    def __init__(self, config, keyboard_emulation):
-        StenoEngine.__init__(self, config, keyboard_emulation)
+    def __init__(self, config, controller, keyboard_emulation):
+        StenoEngine.__init__(self, config, controller, keyboard_emulation)
         QThread.__init__(self)
-        self.hook_connect('quit', QCoreApplication.quit)
         self._signals = {}
         for hook in self.HOOKS:
             signal = getattr(self, 'signal_' + hook)
@@ -45,11 +43,15 @@ class Engine(StenoEngine, QThread):
         QThread.start(self)
         StenoEngine.start(self)
 
+    def join(self):
+        QThread.wait(self)
+        return self.code
+
     def run(self):
-        if sys.platform.startswith('darwin'):
+        if PLATFORM == 'mac':
             import appnope
             appnope.nope()
-        super(Engine, self).run()
+        super().run()
 
     def signal_connect(self, name, callback):
         self._signals[name].connect(callback)

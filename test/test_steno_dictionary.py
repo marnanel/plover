@@ -3,160 +3,224 @@
 
 """Unit tests for steno_dictionary.py."""
 
-import unittest
-
-# Python 2/3 compatibility.
-from six import assertCountEqual
+import pytest
 
 from plover.steno_dictionary import StenoDictionary, StenoDictionaryCollection
 
+from plover_build_utils.testing import dictionary_test
 
-class StenoDictionaryTestCase(unittest.TestCase):
 
-    def test_dictionary(self):
-        notifications = []
-        def listener(longest_key):
-            notifications.append(longest_key)
-        
-        d = StenoDictionary()
-        self.assertEqual(d.longest_key, 0)
-        
-        d.add_longest_key_listener(listener)
-        d[('S',)] = 'a'
-        self.assertEqual(d.longest_key, 1)
-        self.assertEqual(notifications, [1])
-        d[('S', 'S', 'S', 'S')] = 'b'
-        self.assertEqual(d.longest_key, 4)
-        self.assertEqual(notifications, [1, 4])
-        d[('S', 'S')] = 'c'
-        self.assertEqual(d.longest_key, 4)
-        self.assertEqual(d[('S', 'S')], 'c')
-        self.assertEqual(notifications, [1, 4])
-        del d[('S', 'S', 'S', 'S')]
-        self.assertEqual(d.longest_key, 2)
-        self.assertEqual(notifications, [1, 4, 2])
-        del d[('S',)]
-        self.assertEqual(d.longest_key, 2)
-        self.assertEqual(notifications, [1, 4, 2])
-        d.clear()
-        self.assertEqual(d.longest_key, 0)
-        self.assertEqual(notifications, [1, 4, 2, 0])
-        
-        d.remove_longest_key_listener(listener)
-        d[('S', 'S')] = 'c'
-        self.assertEqual(d.longest_key, 2)
-        self.assertEqual(notifications, [1, 4, 2, 0])
-        
-        self.assertEqual(list(StenoDictionary([('a', 'b')]).items()), [('a', 'b')])
-        self.assertEqual(list(StenoDictionary(a='b').items()), [('a', 'b')])
+def test_dictionary_collection():
+    d1 = StenoDictionary()
+    d1[('S',)] = 'a'
+    d1[('T',)] = 'b'
+    d1.path = 'd1'
+    d2 = StenoDictionary()
+    d2[('S',)] = 'c'
+    d2[('W',)] = 'd'
+    d2.path = 'd2'
+    dc = StenoDictionaryCollection([d2, d1])
+    assert dc.lookup(('S',)) == 'c'
+    assert dc.lookup(('W',)) == 'd'
+    assert dc.lookup(('T',)) == 'b'
+    assert dc.lookup_from_all(('S',)) == [('c', d2), ('a', d1)]
+    assert dc.lookup_from_all(('W',)) == [('d', d2)]
+    assert dc.lookup_from_all(('T',)) == [('b', d1)]
+    f = lambda k, v: v == 'c'
+    dc.add_filter(f)
+    assert dc.lookup(('S',)) == 'a'
+    assert dc.raw_lookup(('S',)) == 'c'
+    assert dc.lookup_from_all(('S',)) == [('a', d1)]
+    g = lambda k, v: v == 'a'
+    dc.add_filter(g)
+    assert dc.lookup(('S',)) is None
+    assert dc.lookup_from_all(('S',)) == []
+    assert dc.raw_lookup(('S',)) == 'c'
+    assert dc.lookup(('W',)) == 'd'
+    assert dc.lookup(('T',)) == 'b'
+    assert dc.raw_lookup(('W',)) == 'd'
+    assert dc.raw_lookup(('T',)) == 'b'
+    assert dc.raw_lookup_from_all(('S',)) == [('c', d2), ('a', d1)]
+    assert dc.raw_lookup_from_all(('W',)) == [('d', d2)]
+    assert dc.raw_lookup_from_all(('T',)) == [('b', d1)]
+    assert dc.reverse_lookup('c') == {('S',)}
 
-    def test_dictionary_collection(self):
-        dc = StenoDictionaryCollection()
-        d1 = StenoDictionary()
-        d1[('S',)] = 'a'
-        d1[('T',)] = 'b'
-        d1.set_path('d1')
-        d2 = StenoDictionary()
-        d2[('S',)] = 'c'
-        d2[('W',)] = 'd'
-        d2.set_path('d2')
-        dc.set_dicts([d1, d2])
-        self.assertEqual(dc.lookup(('S',)), 'c')
-        self.assertEqual(dc.lookup(('W',)), 'd')
-        self.assertEqual(dc.lookup(('T',)), 'b')
-        f = lambda k, v: v == 'c'
-        dc.add_filter(f)
-        self.assertIsNone(dc.lookup(('S',)))
-        self.assertEqual(dc.raw_lookup(('S',)), 'c')
-        self.assertEqual(dc.lookup(('W',)), 'd')
-        self.assertEqual(dc.lookup(('T',)), 'b')
-        self.assertEqual(dc.reverse_lookup('c'), [('S',)])
-        
-        dc.remove_filter(f)
-        self.assertEqual(dc.lookup(('S',)), 'c')
-        self.assertEqual(dc.lookup(('W',)), 'd')
-        self.assertEqual(dc.lookup(('T',)), 'b')
-        
-        self.assertEqual(dc.reverse_lookup('c'), [('S',)])
-        
-        dc.set(('S',), 'e')
-        self.assertEqual(dc.lookup(('S',)), 'e')
-        self.assertEqual(d2[('S',)], 'e')
+    dc.remove_filter(f)
+    dc.remove_filter(g)
+    assert dc.lookup(('S',)) == 'c'
+    assert dc.lookup(('W',)) == 'd'
+    assert dc.lookup(('T',)) == 'b'
+    assert dc.lookup_from_all(('S',)) == [('c', d2), ('a', d1)]
+    assert dc.lookup_from_all(('W',)) == [('d', d2)]
+    assert dc.lookup_from_all(('T',)) == [('b', d1)]
 
-        dc.set(('S',), 'f', dictionary='d1')
-        self.assertEqual(dc.lookup(('S',)), 'e')
-        self.assertEqual(d1[('S',)], 'f')
-        self.assertEqual(d2[('S',)], 'e')
+    assert dc.reverse_lookup('c') == {('S',)}
 
-    def test_dictionary_collection_longest_key(self):
+    dc.set(('S',), 'e')
+    assert dc.lookup(('S',)) == 'e'
+    assert d2[('S',)] == 'e'
 
-        k1 = ('S',)
-        k2 = ('S', 'T')
-        k3 = ('S', 'T', 'R')
+    dc.set(('S',), 'f', path='d1')
+    assert dc.lookup(('S',)) == 'e'
+    assert d1[('S',)] == 'f'
+    assert d2[('S',)] == 'e'
 
-        dc = StenoDictionaryCollection()
-        self.assertEqual(dc.longest_key, 0)
+    # Iterating on a StenoDictionaryCollection is
+    # the same as iterating on its dictionaries' paths.
+    assert list(dc) == ['d2', 'd1']
 
-        d1 = StenoDictionary()
-        d1._path = 'd1'
-        d1.save = lambda: None
-        d1[k1] = 'a'
+    # Test get and [].
+    assert dc.get('d1') == d1
+    assert dc['d1'] == d1
+    assert dc.get('invalid') is None
+    with pytest.raises(KeyError):
+        dc['invalid']
 
-        dc.set_dicts([d1])
-        self.assertEqual(dc.longest_key, 1)
 
-        d1[k2] = 'a'
-        self.assertEqual(dc.longest_key, 2)
+def test_dictionary_collection_writeable():
+    d1 = StenoDictionary()
+    d1[('S',)] = 'a'
+    d1[('T',)] = 'b'
+    d2 = StenoDictionary()
+    d2[('S',)] = 'c'
+    d2[('W',)] = 'd'
+    d2.readonly = True
+    dc = StenoDictionaryCollection([d2, d1])
+    assert dc.first_writable() == d1
+    dc.set(('S',), 'A')
+    assert d1[('S',)] == 'A'
+    assert d2[('S',)] == 'c'
 
-        d2 = StenoDictionary()
-        d2._path = 'd2'
-        d2[k3] = 'c'
 
-        dc.set_dicts([d1, d2])
-        self.assertEqual(dc.longest_key, 3)
+def test_dictionary_collection_longest_key():
 
-        del d1[k2]
-        self.assertEqual(dc.longest_key, 3)
+    k1 = ('S',)
+    k2 = ('S', 'T')
+    k3 = ('S', 'T', 'R')
 
-        dc.set_dicts([d1])
-        self.assertEqual(dc.longest_key, 1)
+    dc = StenoDictionaryCollection()
+    assert dc.longest_key == 0
 
-        dc.set_dicts([])
-        self.assertEqual(dc.longest_key, 0)
+    d1 = StenoDictionary()
+    d1.path = 'd1'
+    d1[k1] = 'a'
 
-    def test_reverse_lookup(self):
-        dc = StenoDictionaryCollection()
+    dc.set_dicts([d1])
+    assert dc.longest_key == 1
 
-        d1 = StenoDictionary()
-        d1[('PWAOUFL',)] = 'beautiful'
-        d1[('WAOUFL',)] = 'beautiful'
+    d1[k2] = 'a'
+    assert dc.longest_key == 2
 
-        d2 = StenoDictionary()
-        d2[('PW-FL',)] = 'beautiful'
+    d2 = StenoDictionary()
+    d2.path = 'd2'
+    d2[k3] = 'c'
 
-        d3 = StenoDictionary()
-        d3[('WAOUFL',)] = 'not beautiful'
+    dc.set_dicts([d2, d1])
+    assert dc.longest_key == 3
 
-        # Simple test.
-        dc.set_dicts([d1])
-        assertCountEqual(self,
-                         dc.reverse_lookup('beautiful'),
-                         [('PWAOUFL',), ('WAOUFL',)])
+    del d1[k2]
+    assert dc.longest_key == 3
 
-        # No duplicates.
-        dc.set_dicts([d2, StenoDictionary(d2)])
-        assertCountEqual(self,
-                         dc.reverse_lookup('beautiful'),
-                         [('PW-FL',)])
+    dc.set_dicts([d1])
+    assert dc.longest_key == 1
 
-        # Don't stop at the first dictionary with matches.
-        dc.set_dicts([d1, d2])
-        assertCountEqual(self,
-                         dc.reverse_lookup('beautiful'),
-                         [('PWAOUFL',), ('WAOUFL',), ('PW-FL',)])
+    dc.set_dicts([])
+    assert dc.longest_key == 0
 
-        # Ignore keys overriden by a higher precedence dictionary.
-        dc.set_dicts([d1, d2, d3])
-        assertCountEqual(self,
-                         dc.reverse_lookup('beautiful'),
-                         [('PWAOUFL',), ('PW-FL',)])
+
+def test_casereverse_lookup():
+    dc = StenoDictionaryCollection()
+
+    d1 = StenoDictionary()
+    d1[('PWAOUFL',)] = 'beautiful'
+    d1[('WAOUFL',)] = 'beAuTIFul'
+
+    d2 = StenoDictionary()
+    d2[('PW-FL',)] = 'BEAUTIFUL'
+
+    d3 = StenoDictionary()
+    d3[('WAOUFL',)] = 'not beautiful'
+
+    dc.set_dicts([d1, d2, d3])
+
+    assert dc.casereverse_lookup('beautiful') == {'beautiful', 'BEAUTIFUL', 'beAuTIFul'}
+
+
+def test_reverse_lookup():
+    dc = StenoDictionaryCollection()
+
+    d1 = StenoDictionary()
+    d1[('PWAOUFL',)] = 'beautiful'
+    d1[('WAOUFL',)] = 'beautiful'
+
+    d2 = StenoDictionary()
+    d2[('PW-FL',)] = 'beautiful'
+
+    d3 = StenoDictionary()
+    d3[('WAOUFL',)] = 'not beautiful'
+
+    # Simple test.
+    dc.set_dicts([d1])
+    assert dc.reverse_lookup('beautiful') == {('PWAOUFL',), ('WAOUFL',)}
+
+    # No duplicates.
+    d2_copy = StenoDictionary()
+    d2_copy.update(d2)
+    dc.set_dicts([d2_copy, d2])
+    assert dc.reverse_lookup('beautiful') == {('PW-FL',)}
+
+    # Don't stop at the first dictionary with matches.
+    dc.set_dicts([d2, d1])
+    assert dc.reverse_lookup('beautiful') == {('PW-FL',), ('PWAOUFL',), ('WAOUFL',)}
+
+    # Ignore keys overridden by a higher precedence dictionary.
+    dc.set_dicts([d3, d2, d1])
+    assert dc.reverse_lookup('beautiful') == {('PW-FL',), ('PWAOUFL',)}
+
+
+def test_dictionary_enabled():
+    dc = StenoDictionaryCollection()
+    d1 = StenoDictionary()
+    d1.path = 'd1'
+    d1[('TEFT',)] = 'test1'
+    d1[('TEFGT',)] = 'Testing'
+    d2 = StenoDictionary()
+    d2[('TEFT',)] = 'test2'
+    d2[('TEFT', '-G')] = 'Testing'
+    d2.path = 'd2'
+    dc.set_dicts([d2, d1])
+    assert dc.lookup(('TEFT',)) == 'test2'
+    assert dc.raw_lookup(('TEFT',)) == 'test2'
+    assert dc.casereverse_lookup('testing') == {'Testing'}
+    assert dc.reverse_lookup('Testing') == {('TEFT', '-G'), ('TEFGT',)}
+    d2.enabled = False
+    assert dc.lookup(('TEFT',)) == 'test1'
+    assert dc.raw_lookup(('TEFT',)) == 'test1'
+    assert dc.casereverse_lookup('testing') == {'Testing'}
+    assert dc.reverse_lookup('Testing') == {('TEFGT',)}
+    d1.enabled = False
+    assert dc.lookup(('TEST',)) is None
+    assert dc.raw_lookup(('TEFT',)) is None
+    assert dc.casereverse_lookup('testing') == set()
+    assert dc.reverse_lookup('Testing') == set()
+
+
+@dictionary_test
+class TestStenoDictionary:
+
+    class DICT_CLASS(StenoDictionary):
+        def _load(self, filename):
+            pass
+    DICT_EXTENSION = 'dict'
+    DICT_SAMPLE = b''
+
+
+@dictionary_test
+class TestReadOnlyStenoDictionary:
+
+    class DICT_CLASS(StenoDictionary):
+        readonly = True
+        def _load(self, filename):
+            pass
+    DICT_EXTENSION = 'dict'
+    DICT_SAMPLE = b''

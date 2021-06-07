@@ -100,7 +100,7 @@
       <property name="widgetResizable">
        <bool>true</bool>
       </property>
-      <widget class="QWidget" name="dictionaries">
+      <widget class="DictionariesWidget" name="dictionaries">
        <property name="geometry">
         <rect>
          <x>0</x>
@@ -127,14 +127,14 @@
        <item row="0" column="0">
         <widget class="QRadioButton" name="output_enable">
          <property name="text">
-          <string>Enable</string>
+          <string>Enabled</string>
          </property>
         </widget>
        </item>
        <item row="1" column="0">
         <widget class="QRadioButton" name="output_disable">
          <property name="text">
-          <string>Disable</string>
+          <string>Disabled</string>
          </property>
          <property name="checked">
           <bool>true</bool>
@@ -163,6 +163,7 @@
     <addaction name="action_Reconnect"/>
     <addaction name="separator"/>
     <addaction name="action_Configure"/>
+    <addaction name="action_OpenConfigFolder"/>
     <addaction name="separator"/>
     <addaction name="action_Show"/>
     <addaction name="action_Quit"/>
@@ -236,6 +237,18 @@
     <string>Ctrl+,</string>
    </property>
   </action>
+  <action name="action_OpenConfigFolder">
+   <property name="icon">
+    <iconset resource="resources/resources.qrc">
+     <normaloff>:/folder.svg</normaloff>:/folder.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Open config &amp;folder</string>
+   </property>
+   <property name="toolTip">
+    <string>Open the configuration folder.</string>
+   </property>
+  </action>
   <action name="action_About">
    <property name="text">
     <string>&amp;About</string>
@@ -282,6 +295,21 @@
    </property>
   </action>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>DictionariesWidget</class>
+   <extends>QWidget</extends>
+   <header>plover.gui_qt.dictionaries_widget</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>scroll_area</tabstop>
+  <tabstop>machine_type</tabstop>
+  <tabstop>reconnect</tabstop>
+  <tabstop>output_enable</tabstop>
+  <tabstop>output_disable</tabstop>
+ </tabstops>
  <resources>
   <include location="resources/resources.qrc"/>
  </resources>
@@ -307,6 +335,22 @@
    <signal>triggered()</signal>
    <receiver>MainWindow</receiver>
    <slot>on_configure()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>140</x>
+     <y>57</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>action_OpenConfigFolder</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>on_open_config_folder()</slot>
    <hints>
     <hint type="sourcelabel">
      <x>-1</x>
@@ -368,9 +412,9 @@
   </connection>
   <connection>
    <sender>machine_type</sender>
-   <signal>activated(QString)</signal>
+   <signal>activated(int)</signal>
    <receiver>MainWindow</receiver>
-   <slot>on_machine_changed(QString)</slot>
+   <slot>on_machine_changed(int)</slot>
    <hints>
     <hint type="sourcelabel">
      <x>86</x>
@@ -434,12 +478,12 @@
  <slots>
   <slot>on_reconnect()</slot>
   <slot>on_configure()</slot>
+  <slot>on_open_config_folder()</slot>
   <slot>on_manage_dictionaries()</slot>
   <slot>on_quit()</slot>
   <slot>on_toggle_output(bool)</slot>
   <slot>on_about()</slot>
-  <slot>on_show_hide()</slot>
-  <slot>on_machine_changed(QString)</slot>
+  <slot>on_machine_changed(int)</slot>
   <slot>on_enable_output()</slot>
   <slot>on_disable_output()</slot>
  </slots>

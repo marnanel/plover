@@ -1,9 +1,8 @@
 
-import io
+from contextlib import contextmanager
+from tempfile import NamedTemporaryFile
 import os
-
-# Python 2/3 compatibility.
-from six import text_type
+import shutil
 
 import pkg_resources
 
@@ -11,7 +10,10 @@ import pkg_resources
 ASSET_SCHEME = 'asset:'
 
 def _asset_split(resource_name):
-    return resource_name[len(ASSET_SCHEME):].split(':', 2)
+    components = resource_name[len(ASSET_SCHEME):].split(':', 1)
+    if len(components) != 2:
+        raise ValueError('invalid asset: %s' % resource_name)
+    return components
 
 def resource_exists(resource_name):
     if resource_name.startswith(ASSET_SCHEME):
@@ -23,15 +25,21 @@ def resource_filename(resource_name):
         return pkg_resources.resource_filename(*_asset_split(resource_name))
     return resource_name
 
-def resource_stream(resource_name, encoding=None):
+def resource_timestamp(resource_name):
     filename = resource_filename(resource_name)
-    mode = 'rb' if encoding is None else 'r'
-    return io.open(filename, mode, encoding=encoding)
+    return os.path.getmtime(filename)
 
-def resource_string(resource_name, encoding=None):
-    if resource_name.startswith(ASSET_SCHEME):
-        s = pkg_resources.resource_string(*_asset_split(resource_name))
-        return s if encoding is None else text_type(s, encoding)
-    mode = 'rb' if encoding is None else 'r'
-    with io.open(resource_name, mode, encoding=encoding) as fp:
-        return fp.read()
+@contextmanager
+def resource_update(resource_name):
+    filename = resource_filename(resource_name)
+    directory = os.path.dirname(filename)
+    extension = os.path.splitext(filename)[1]
+    tempfile = NamedTemporaryFile(delete=False, dir=directory,
+                                  suffix=extension or None)
+    try:
+        tempfile.close()
+        yield tempfile.name
+        shutil.move(tempfile.name, filename)
+    finally:
+        if os.path.exists(tempfile.name):
+            os.unlink(tempfile.name)

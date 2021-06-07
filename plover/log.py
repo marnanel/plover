@@ -11,7 +11,7 @@ import traceback
 from logging.handlers import RotatingFileHandler
 from logging import DEBUG, INFO, WARNING, ERROR
 
-from plover.oslayer.config import CONFIG_DIR
+from plover.oslayer.config import CONFIG_DIR, PLATFORM
 
 
 LOG_FORMAT = '%(asctime)s [%(threadName)s] %(levelname)s: %(message)s'
@@ -31,22 +31,23 @@ class NoExceptionTracebackFormatter(logging.Formatter):
         orig_exc_text = record.exc_text
         record.exc_text = None
         try:
-            return super(NoExceptionTracebackFormatter, self).format(record)
+            return super().format(record)
         finally:
             record.exc_text = orig_exc_text
 
     def formatException(self, exc_info):
         etype, evalue, tb = exc_info
         lines = traceback.format_exception_only(etype, evalue)
-        return u''.join(lines)
+        return ''.join(lines)
 
 
 class FileHandler(RotatingFileHandler):
 
     def __init__(self, filename=LOG_FILENAME, format=LOG_FORMAT):
-        super(FileHandler, self).__init__(filename,
-                                          maxBytes=LOG_MAX_BYTES,
-                                          backupCount=LOG_COUNT)
+        super().__init__(filename,
+                         maxBytes=LOG_MAX_BYTES,
+                         backupCount=LOG_COUNT,
+                         encoding='utf-8')
         self.setFormatter(logging.Formatter(format))
 
 
@@ -54,11 +55,11 @@ class PrintHandler(logging.StreamHandler):
     """ Handler using L{print_} to output messages. """
 
     def __init__(self, format=LOG_FORMAT):
-        super(PrintHandler, self).__init__(sys.stderr)
+        super().__init__(sys.stderr)
         self.setFormatter(logging.Formatter(format))
 
 
-class Logger(object):
+class Logger:
 
     def __init__(self):
         self._print_handler = PrintHandler()
@@ -83,13 +84,13 @@ class Logger(object):
             return
         handler_class = None
         try:
-            if sys.platform.startswith('linux'):
+            if PLATFORM == 'linux':
                 from plover.oslayer.log_dbus import DbusNotificationHandler
                 handler_class = DbusNotificationHandler
-            elif sys.platform.startswith('darwin'):
+            elif PLATFORM == 'mac':
                 from plover.oslayer.log_osx import OSXNotificationHandler
                 handler_class = OSXNotificationHandler
-            elif sys.platform.startswith('win32'):
+            elif PLATFORM == 'win':
                 from plover.oslayer.log_plyer import PlyerNotificationHandler
                 handler_class = PlyerNotificationHandler
         except Exception:
@@ -116,29 +117,51 @@ class Logger(object):
         self._file_handler.setLevel(self.level)
         self._logger.addHandler(self._file_handler)
 
+    def _setup_stroke_logging(self):
+        is_logging = self._stroke_handler is not None
+        must_log = ((self._log_strokes or self._log_translations)
+                    and self._stroke_filename is not None)
+        if must_log:
+            if is_logging:
+                start_logging = stop_logging = self._stroke_filename != self._stroke_handler.baseFilename
+            else:
+                stop_logging = False
+                start_logging = True
+        else:
+            stop_logging = is_logging
+            start_logging = False
+        if stop_logging:
+            self._stroke_logger.removeHandler(self._stroke_handler)
+            self._stroke_handler.close()
+            self._stroke_handler = None
+        if start_logging:
+            self._stroke_handler = FileHandler(filename=self._stroke_filename,
+                                               format=STROKE_LOG_FORMAT)
+            self._stroke_logger.addHandler(self._stroke_handler)
+
     def set_stroke_filename(self, filename=None):
         if filename is not None:
             filename = os.path.realpath(filename)
         if self._stroke_filename == filename:
             return
+        assert filename != LOG_FILENAME
         self.info('set_stroke_filename(%s)', filename)
-        if self._stroke_handler is not None:
-            self._stroke_logger.removeHandler(self._stroke_handler)
-            self._stroke_handler = None
-        if filename is not None:
-            assert filename != LOG_FILENAME
-            self._stroke_handler = FileHandler(filename=filename,
-                                               format=STROKE_LOG_FORMAT)
-            self._stroke_logger.addHandler(self._stroke_handler)
         self._stroke_filename = filename
+        self._setup_stroke_logging()
 
-    def enable_stroke_logging(self, b):
-        self.info('enable_stroke_logging(%s)', b)
-        self._log_strokes = b
+    def enable_stroke_logging(self, enable):
+        if self._log_strokes == enable:
+            return
+        self.info('enable_stroke_logging(%s)', enable)
+        self._log_strokes = enable
+        self._setup_stroke_logging()
 
-    def enable_translation_logging(self, b):
-        self.info('enable_translation_logging(%s)', b)
-        self._log_translations = b
+    def enable_translation_logging(self, enable):
+        if self._log_translations == enable:
+            return
+        self.info('enable_translation_logging(%s)', enable)
+        self._log_translations = enable
+        self._setup_stroke_logging()
 
     def log_stroke(self, stroke):
         if not self._log_strokes or self._stroke_handler is None:

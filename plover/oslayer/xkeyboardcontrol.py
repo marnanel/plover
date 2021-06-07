@@ -21,14 +21,12 @@ http://tronche.com/gui/x/xlib/input/keyboard-encoding.html
 
 """
 
+from functools import wraps
 import errno
 import os
 import string
 import select
 import threading
-
-# Python 2/3 compatibility.
-from six import text_type, unichr
 
 from Xlib import X, XK, display
 from Xlib.ext import xinput, xtest
@@ -40,6 +38,8 @@ from plover import log
 
 # Enable support for media keys.
 XK.load_keysym_group('xf86')
+# Load non-us keyboard related keysyms.
+XK.load_keysym_group('xkb')
 
 # Create case insensitive mapping of keyname to keysym.
 KEY_TO_KEYSYM = {}
@@ -144,34 +144,89 @@ KEYCODE_TO_KEY = {
 
 KEY_TO_KEYCODE = dict(zip(KEYCODE_TO_KEY.values(), KEYCODE_TO_KEY.keys()))
 
-class KeyboardCapture(threading.Thread):
+def with_display_lock(func):
+    """
+    Use this function as a decorator on a method of the XEventLoop class (or
+    one of its subclasses) to acquire the _display_lock of the object before
+    calling the function and release it afterwards.
+    """
+    # To keep __doc__/__name__ attributes of the initial function.
+    @wraps(func)
+    def wrapped(self, *args, **kwargs):
+        with self._display_lock:
+            return func(self, *args, **kwargs)
+    return wrapped
+
+class XEventLoop(threading.Thread):
+
+    def __init__(self, name='xev'):
+        super().__init__()
+        self.name += '-' + name
+        self._display = display.Display()
+        self._pipe = os.pipe()
+        self._display_lock = threading.Lock()
+        self._readfds = (self._pipe[0], self._display.fileno())
+
+    def _on_event(self, event):
+        pass
+
+    @with_display_lock
+    def _process_pending_events(self):
+        for __ in range(self._display.pending_events()):
+            self._on_event(self._display.next_event())
+
+    def run(self):
+        while True:
+            self._process_pending_events()
+            # No more events: sleep until we get new data on the
+            # display connection, or on the pipe used to signal
+            # the end of the loop.
+            try:
+                rlist, wlist, xlist = select.select(self._readfds, (), ())
+            except select.error as err:
+                if isinstance(err, OSError):
+                    code = err.errno
+                else:
+                    code = err[0]
+                if code != errno.EINTR:
+                    raise
+                continue
+            assert not wlist
+            assert not xlist
+            if self._pipe[0] in rlist:
+                break
+            # If we're here, rlist should contains the display fd,
+            # and the next iteration will find some pending events.
+
+    def cancel(self):
+        # Wake up the capture thread...
+        os.write(self._pipe[1], b'quit')
+        # ...and wait for it to terminate.
+        self.join()
+        for fd in self._pipe:
+            os.close(fd)
+
+
+class KeyboardCapture(XEventLoop):
     """Listen to keyboard press and release events."""
 
     def __init__(self):
         """Prepare to listen for keyboard events."""
-        threading.Thread.__init__(self)
-        self.name += '-capture'
-        self.context = None
-        self.key_events_to_ignore = []
+        super().__init__(name='capture')
+        self._window = self._display.screen().root
+        if not self._display.has_extension('XInputExtension'):
+            raise Exception('Xlib\'s XInput extension is required, but could not be found.')
         self._suppressed_keys = set()
+        self._devices = []
         self.key_down = lambda key: None
         self.key_up = lambda key: None
 
-        # Get references to the display.
-        self.display = display.Display()
-        self.window = self.display.screen().root
-
-        if not self.display.has_extension('XInputExtension'):
-            raise Exception('Xlib\'s XInput extension is required, but could not be found.')
-
-        self.devices = []
-        self.pipe = os.pipe()
-        self._update_devices()
-
     def _update_devices(self):
         # Find all keyboard devices.
+        # This function is never called while the event loop thread is running,
+        # so it is unnecessary to lock self._display_lock.
         keyboard_devices = []
-        for devinfo in self.display.xinput_query_device(xinput.AllDevices).devices:
+        for devinfo in self._display.xinput_query_device(xinput.AllDevices).devices:
             # Only keep slave devices.
             # Note: we look at pointer devices too, as some keyboards (like the
             # VicTop mechanical gaming keyboard) register 2 devices, including
@@ -190,95 +245,76 @@ class KeyboardCapture(threading.Thread):
                     keyboard_devices.append(devinfo.deviceid)
                     break
         if XINPUT_DEVICE_ID == xinput.AllDevices:
-            self.devices = keyboard_devices
+            self._devices = keyboard_devices
         else:
-            self.devices = [XINPUT_DEVICE_ID]
-        log.info('XInput devices: %s', ', '.join(map(str, self.devices)))
+            self._devices = [XINPUT_DEVICE_ID]
+        log.info('XInput devices: %s', ', '.join(map(str, self._devices)))
 
-    def run(self):
-        self.window.xinput_select_events([
+    def _on_event(self, event):
+        if event.type != GenericEventCode:
+            return
+        if event.evtype not in (xinput.KeyPress, xinput.KeyRelease):
+            return
+        assert event.data.sourceid in self._devices
+        keycode = event.data.detail
+        modifiers = event.data.mods.effective_mods & ~0b10000 & 0xFF
+        key = KEYCODE_TO_KEY.get(keycode)
+        if key is None:
+            # Not a supported key, ignore...
+            return
+        # ...or pass it on to a callback method.
+        if event.evtype == xinput.KeyPress:
+            # Ignore event if a modifier is set.
+            if modifiers == 0:
+                self.key_down(key)
+        elif event.evtype == xinput.KeyRelease:
+            self.key_up(key)
+
+    def start(self):
+        self._update_devices()
+        self._window.xinput_select_events([
             (deviceid, XINPUT_EVENT_MASK)
-            for deviceid in self.devices
+            for deviceid in self._devices
         ])
-        display_fileno = self.display.fileno()
-        while True:
-            if not self.display.pending_events():
-                try:
-                    rlist, wlist, xlist = select.select((self.pipe[0],
-                                                         display_fileno),
-                                                        (), ())
-                except select.error as err:
-                    if isinstance(err, OSError):
-                        code = err.errno
-                    else:
-                        code = err[0]
-                    if code != errno.EINTR:
-                        raise
-                    continue
-                assert not wlist
-                assert not xlist
-                if self.pipe[0] in rlist:
-                    break
-                # If we're here, rlist should contains display_fileno,
-                # trigger a new iteration to check for pending events.
-                continue
-            event = self.display.next_event()
-            if event.type != GenericEventCode:
-                continue
-            if event.evtype not in (xinput.KeyPress, xinput.KeyRelease):
-                continue
-            assert event.data.sourceid in self.devices
-            keycode = event.data.detail
-            modifiers = event.data.mods.effective_mods & ~0b10000 & 0xFF
-            key = KEYCODE_TO_KEY.get(keycode)
-            if key is None:
-                # Not a supported key, ignore...
-                continue
-            # ...or pass it on to a callback method.
-            if event.evtype == xinput.KeyPress:
-                # Ignore event if a modifier is set.
-                if modifiers == 0:
-                    self.key_down(key)
-            elif event.evtype == xinput.KeyRelease:
-                self.key_up(key)
+        suppressed_keys = self._suppressed_keys
+        self._suppressed_keys = set()
+        self.suppress_keyboard(suppressed_keys)
+        super().start()
 
     def cancel(self):
-        """Stop listening for keyboard events."""
         self.suppress_keyboard()
-        # Wake up the capture thread...
-        os.write(self.pipe[1], b'quit')
-        # ...and wait for it to terminate.
-        self.join()
+        super().cancel()
 
-    def grab_key(self, keycode):
-        for deviceid in self.devices:
-            self.window.xinput_grab_keycode(deviceid,
-                                            X.CurrentTime,
-                                            keycode,
-                                            xinput.GrabModeAsync,
-                                            xinput.GrabModeAsync,
-                                            True,
-                                            XINPUT_EVENT_MASK,
-                                            (0, X.Mod2Mask))
+    def _grab_key(self, keycode):
+        for deviceid in self._devices:
+            self._window.xinput_grab_keycode(deviceid,
+                                             X.CurrentTime,
+                                             keycode,
+                                             xinput.GrabModeAsync,
+                                             xinput.GrabModeAsync,
+                                             True,
+                                             XINPUT_EVENT_MASK,
+                                             (0, X.Mod2Mask))
 
-    def ungrab_key(self, keycode):
-        for deviceid in self.devices:
-            self.window.xinput_ungrab_keycode(deviceid,
-                                              keycode,
-                                              (0, X.Mod2Mask))
+    def _ungrab_key(self, keycode):
+        for deviceid in self._devices:
+            self._window.xinput_ungrab_keycode(deviceid,
+                                               keycode,
+                                               (0, X.Mod2Mask))
 
+    @with_display_lock
     def suppress_keyboard(self, suppressed_keys=()):
         suppressed_keys = set(suppressed_keys)
         if self._suppressed_keys == suppressed_keys:
             return
         for key in self._suppressed_keys - suppressed_keys:
-            self.ungrab_key(KEY_TO_KEYCODE[key])
+            self._ungrab_key(KEY_TO_KEYCODE[key])
             self._suppressed_keys.remove(key)
         for key in suppressed_keys - self._suppressed_keys:
-            self.grab_key(KEY_TO_KEYCODE[key])
+            self._grab_key(KEY_TO_KEYCODE[key])
             self._suppressed_keys.add(key)
         assert self._suppressed_keys == suppressed_keys
-        self.display.sync()
+        self._display.sync()
 
 
 # Keysym to Unicode conversion table.
@@ -1061,15 +1097,14 @@ KEYSYM_TO_UCS = {
   0x20ab: 0x20ab, #                    DongSign ₫ DONG SIGN
   0x20ac: 0x20ac, #                    EuroSign € EURO SIGN
 }
-UCS_TO_KEYSYM = dict((ucs, keysym)
-                     for keysym, ucs
-                     in KEYSYM_TO_UCS.items())
+UCS_TO_KEYSYM = {ucs: keysym
+                 for keysym, ucs
+                 in KEYSYM_TO_UCS.items()}
 
 def is_latin1(code):
     return 0x20 <= code <= 0x7e or 0xa0 <= code <= 0xff
 
 def uchr_to_keysym(char):
-    assert isinstance(char, text_type)
     code = ord(char)
     # Latin-1 characters: direct, 1:1 mapping.
     if is_latin1(code):
@@ -1091,19 +1126,19 @@ def keysym_to_string(keysym):
         if code is None:
             keysym_str = XK.keysym_to_string(keysym)
             if keysym_str is None:
-                keysym_str = u''
+                keysym_str = ''
             for c in keysym_str:
                 if c not in string.printable:
-                    keysym_str = u''
+                    keysym_str = ''
                     break
             return keysym_str
-    return unichr(code)
+    return chr(code)
 
 
-class KeyboardEmulation(object):
+class KeyboardEmulation:
     """Emulate keyboard events."""
 
-    class Mapping(object):
+    class Mapping:
 
         def __init__(self, keycode, modifiers, keysym, custom_mapping=None):
             self.keycode = keycode
@@ -1112,7 +1147,7 @@ class KeyboardEmulation(object):
             self.custom_mapping = custom_mapping
 
         def __str__(self):
-            return u'%u:%x=%x[%s]%s' % (
+            return '%u:%x=%x[%s]%s' % (
                 self.keycode, self.modifiers,
                 self.keysym, keysym_to_string(self.keysym),
                 '' if self.custom_mapping is None else '*',
@@ -1124,28 +1159,30 @@ class KeyboardEmulation(object):
     CUSTOM_MAPPING_LENGTH = 3
     # Special keysym to mark custom keyboard mappings.
     PLOVER_MAPPING_KEYSYM = 0x01ffffff
+    # Free unused keysym.
+    UNUSED_KEYSYM = 0xffffff # XK_VoidSymbol
 
     def __init__(self):
         """Prepare to emulate keyboard events."""
-        self.display = display.Display()
+        self._display = display.Display()
         self._update_keymap()
 
     def _update_keymap(self):
         '''Analyse keymap, build a mapping of keysym to (keycode + modifiers),
         and find unused keycodes that can be used for unmapped keysyms.
         '''
-        self.keymap = {}
-        self.custom_mappings_queue = []
+        self._keymap = {}
+        self._custom_mappings_queue = []
         # Analyse X11 keymap.
-        keycode = self.display.display.info.min_keycode
-        keycode_count = self.display.display.info.max_keycode - keycode + 1
-        for mapping in self.display.get_keyboard_mapping(keycode, keycode_count):
+        keycode = self._display.display.info.min_keycode
+        keycode_count = self._display.display.info.max_keycode - keycode + 1
+        for mapping in self._display.get_keyboard_mapping(keycode, keycode_count):
             mapping = tuple(mapping)
             while mapping and X.NoSymbol == mapping[-1]:
                 mapping = mapping[:-1]
             if not mapping:
                 # Free never used before keycode.
-                custom_mapping = [X.NoSymbol] * self.CUSTOM_MAPPING_LENGTH
+                custom_mapping = [self.UNUSED_KEYSYM] * self.CUSTOM_MAPPING_LENGTH
                 custom_mapping[-1] = self.PLOVER_MAPPING_KEYSYM
                 mapping = custom_mapping
             elif self.CUSTOM_MAPPING_LENGTH == len(mapping) and \
@@ -1158,7 +1195,7 @@ class KeyboardEmulation(object):
             for keysym_index, keysym in enumerate(mapping):
                 if keysym == self.PLOVER_MAPPING_KEYSYM:
                     continue
-                if not keysym_index in (0, 1, 4, 5):
+                if keysym_index not in (0, 1, 4, 5):
                     continue
                 modifiers = 0
                 if 1 == (keysym_index % 2):
@@ -1168,25 +1205,25 @@ class KeyboardEmulation(object):
                     # 3rd (AltGr) level.
                     modifiers |= X.Mod5Mask
                 mapping = self.Mapping(keycode, modifiers, keysym, custom_mapping)
-                if keysym != X.NoSymbol:
+                if keysym != X.NoSymbol and keysym != self.UNUSED_KEYSYM:
                     # Some keysym are mapped multiple times, prefer lower modifiers combos.
-                    previous_mapping = self.keymap.get(keysym)
+                    previous_mapping = self._keymap.get(keysym)
                     if previous_mapping is None or mapping.modifiers < previous_mapping.modifiers:
-                        self.keymap[keysym] = mapping
+                        self._keymap[keysym] = mapping
                 if custom_mapping is not None:
-                    self.custom_mappings_queue.append(mapping)
+                    self._custom_mappings_queue.append(mapping)
             keycode += 1
         log.debug('keymap:')
-        for mapping in sorted(self.keymap.values(), key=lambda m: (m.keycode, m.modifiers)):
+        for mapping in sorted(self._keymap.values(), key=lambda m: (m.keycode, m.modifiers)):
             log.debug('%s', mapping)
-        log.info('%u custom mappings(s)', len(self.custom_mappings_queue))
+        log.info('%u custom mappings(s)', len(self._custom_mappings_queue))
         # Determine the backspace mapping.
         backspace_keysym = XK.string_to_keysym('BackSpace')
-        self.backspace_mapping = self._get_mapping(backspace_keysym)
-        assert self.backspace_mapping is not None
-        assert self.backspace_mapping.custom_mapping is None
+        self._backspace_mapping = self._get_mapping(backspace_keysym)
+        assert self._backspace_mapping is not None
+        assert self._backspace_mapping.custom_mapping is None
         # Get modifier mapping.
-        self.modifier_mapping = self.display.get_modifier_mapping()
+        self.modifier_mapping = self._display.get_modifier_mapping()
 
     def send_backspaces(self, number_of_backspaces):
         """Emulate the given number of backspaces.
@@ -1199,9 +1236,9 @@ class KeyboardEmulation(object):
 
         """
         for x in range(number_of_backspaces):
-            self._send_keycode(self.backspace_mapping.keycode,
-                               self.backspace_mapping.modifiers)
-        self.display.sync()
+            self._send_keycode(self._backspace_mapping.keycode,
+                               self._backspace_mapping.modifiers)
+        self._display.sync()
 
     def send_string(self, s):
         """Emulate the given string.
@@ -1213,7 +1250,6 @@ class KeyboardEmulation(object):
         s -- The string to emulate.
 
         """
-        assert isinstance(s, text_type)
         for char in s:
             keysym = uchr_to_keysym(char)
             mapping = self._get_mapping(keysym)
@@ -1221,7 +1257,7 @@ class KeyboardEmulation(object):
                 continue
             self._send_keycode(mapping.keycode,
                                mapping.modifiers)
-        self.display.sync()
+        self._display.sync()
 
     def send_key_combination(self, combo_string):
         """Emulate a sequence of key combinations.
@@ -1252,8 +1288,8 @@ class KeyboardEmulation(object):
         ]
         # Emulate the key combination by sending key events.
         for keycode, event_type in key_events:
-            xtest.fake_input(self.display, event_type, keycode)
-        self.display.sync()
+            xtest.fake_input(self._display, event_type, keycode)
+        self._display.sync()
 
     def _send_keycode(self, keycode, modifiers=0):
         """Emulate a key press and release.
@@ -1274,13 +1310,13 @@ class KeyboardEmulation(object):
         ]
         # Press modifiers.
         for mod_keycode in modifiers_list:
-            xtest.fake_input(self.display, X.KeyPress, mod_keycode)
+            xtest.fake_input(self._display, X.KeyPress, mod_keycode)
         # Press and release the base key.
-        xtest.fake_input(self.display, X.KeyPress, keycode)
-        xtest.fake_input(self.display, X.KeyRelease, keycode)
+        xtest.fake_input(self._display, X.KeyPress, keycode)
+        xtest.fake_input(self._display, X.KeyRelease, keycode)
         # Release modifiers.
         for mod_keycode in reversed(modifiers_list):
-            xtest.fake_input(self.display, X.KeyRelease, mod_keycode)
+            xtest.fake_input(self._display, X.KeyRelease, mod_keycode)
 
     def _get_keycode_from_keystring(self, keystring):
         '''Find the physical key <keystring> is mapped to.
@@ -1308,35 +1344,35 @@ class KeyboardEmulation(object):
         keysym -- A key symbol.
 
         """
-        mapping = self.keymap.get(keysym)
+        mapping = self._keymap.get(keysym)
         if mapping is None:
             # Automatically map?
             if not automatically_map:
                 # No.
                 return None
             # Can we map it?
-            if 0 == len(self.custom_mappings_queue):
+            if 0 == len(self._custom_mappings_queue):
                 # Nope...
                 return None
-            mapping = self.custom_mappings_queue.pop(0)
+            mapping = self._custom_mappings_queue.pop(0)
             previous_keysym = mapping.keysym
             keysym_index = mapping.custom_mapping.index(previous_keysym)
             # Update X11 keymap.
             mapping.custom_mapping[keysym_index] = keysym
-            self.display.change_keyboard_mapping(mapping.keycode, [mapping.custom_mapping])
+            self._display.change_keyboard_mapping(mapping.keycode, [mapping.custom_mapping])
             # Update our keymap.
-            if previous_keysym in self.keymap:
-                del self.keymap[previous_keysym]
+            if previous_keysym in self._keymap:
+                del self._keymap[previous_keysym]
             mapping.keysym = keysym
-            self.keymap[keysym] = mapping
-            log.debug(u'new mapping: %s', mapping)
+            self._keymap[keysym] = mapping
+            log.debug('new mapping: %s', mapping)
             # Move custom mapping back at the end of
             # the queue so we don't use it too soon.
-            self.custom_mappings_queue.append(mapping)
+            self._custom_mappings_queue.append(mapping)
         elif mapping.custom_mapping is not None:
             # Same as above; prevent mapping
             # from being reused to soon.
-            self.custom_mappings_queue.remove(mapping)
-            self.custom_mappings_queue.append(mapping)
+            self._custom_mappings_queue.remove(mapping)
+            self._custom_mappings_queue.append(mapping)
         return mapping
 

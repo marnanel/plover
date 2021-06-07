@@ -4,28 +4,60 @@
 """Platform dependent configuration."""
 
 import os
-from os.path import realpath, join, dirname, abspath, isfile, pardir
 import sys
 
 import appdirs
 import pkg_resources
 
 
-# If plover is run from a pyinstaller binary.
-if hasattr(sys, 'frozen') and hasattr(sys, '_MEIPASS'):
-    PROGRAM_DIR = dirname(sys.executable)
-# If plover is run from an app bundle on Mac.
-elif sys.platform.startswith('darwin') and '.app' in realpath(__file__):
-    PROGRAM_DIR = abspath(join(dirname(sys.executable), *[pardir] * 3))
+if sys.platform.startswith('darwin'):
+    PLATFORM = 'mac'
+elif sys.platform.startswith('linux'):
+    PLATFORM = 'linux'
+elif sys.platform.startswith('win'):
+    PLATFORM = 'win'
+elif sys.platform.startswith(('freebsd', 'openbsd')):
+    PLATFORM = 'bsd'
+else:
+    PLATFORM = None
+
+# If the program's working directory has a plover.cfg file then run in
+# "portable mode", i.e. store all data in the same directory. This allows
+# keeping all Plover files in a portable drive.
+#
+# Note: the special case when run from an app bundle on macOS.
+if PLATFORM == 'mac' and '.app/' in os.path.realpath(__file__):
+    PROGRAM_DIR = os.path.abspath(os.path.join(os.path.dirname(sys.executable),
+                                               *[os.path.pardir] * 3))
 else:
     PROGRAM_DIR = os.getcwd()
 
-ASSETS_DIR = pkg_resources.resource_filename('plover', 'assets')
-
-# If the program's directory has a plover.cfg file then run in "portable mode",
-# i.e. store all data in the same directory. This allows keeping all Plover
-# files in a portable drive.
-if isfile(join(PROGRAM_DIR, 'plover.cfg')):
+# Setup configuration directory.
+CONFIG_BASENAME = 'plover.cfg'
+if os.path.isfile(os.path.join(PROGRAM_DIR, CONFIG_BASENAME)):
     CONFIG_DIR = PROGRAM_DIR
 else:
-    CONFIG_DIR = appdirs.user_data_dir('plover', 'plover')
+    config_directories = [
+        getattr(appdirs, directory_type)('plover')
+        for directory_type in ('user_config_dir', 'user_data_dir')
+    ]
+    for CONFIG_DIR in config_directories:
+        if os.path.isfile(os.path.join(CONFIG_DIR, CONFIG_BASENAME)):
+            break
+    else:
+        CONFIG_DIR = config_directories[0]
+CONFIG_FILE = os.path.join(CONFIG_DIR, CONFIG_BASENAME)
+
+# Setup plugins directory.
+PLUGINS_PLATFORM = PLATFORM
+
+plover_dist = pkg_resources.working_set.by_key['plover']
+
+ASSETS_DIR = plover_dist.get_resource_filename(__name__, 'plover/assets')
+
+# Is support for the QT GUI available?
+HAS_GUI_QT = True
+for req in plover_dist.requires(('gui_qt',)):
+    if pkg_resources.working_set.find(req) is None:
+        HAS_GUI_QT = False
+        break

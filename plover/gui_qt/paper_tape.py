@@ -9,15 +9,13 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 
-from plover import system
+from wcwidth import wcwidth
+
+from plover import _, system
 
 from plover.gui_qt.paper_tape_ui import Ui_PaperTape
-from plover.gui_qt.i18n import get_gettext
 from plover.gui_qt.utils import ToolBar
 from plover.gui_qt.tool import Tool
-
-
-_ = get_gettext()
 
 
 class PaperTape(Tool, Ui_PaperTape):
@@ -29,14 +27,20 @@ class PaperTape(Tool, Ui_PaperTape):
     ROLE = 'paper_tape'
     SHORTCUT = 'Ctrl+T'
 
-    STYLE_PAPER, STYLE_RAW = (_('Paper'), _('Raw'))
+    STYLE_PAPER, STYLE_RAW = (
+        # i18n: Paper tape style.
+        _('Paper'),
+        # i18n: Paper tape style.
+        _('Raw'),
+    )
     STYLES = (STYLE_PAPER, STYLE_RAW)
 
     def __init__(self, engine):
-        super(PaperTape, self).__init__(engine)
+        super().__init__(engine)
         self.setupUi(self)
         self._strokes = []
         self._all_keys = None
+        self._all_keys_filler = None
         self._formatter = None
         self._history_size = 2000000
         self.styles.addItems(self.STYLES)
@@ -82,6 +86,10 @@ class PaperTape(Tool, Ui_PaperTape):
         if 'system_name' in config:
             self._strokes = []
             self._all_keys = ''.join(key.strip('-') for key in system.KEYS)
+            self._all_keys_filler = [
+                ' ' * wcwidth(k)
+                for k in self._all_keys
+            ]
             self._numbers = set(system.NUMBERS.values())
             self.header.setText(self._all_keys)
             self.on_style_changed(self._style)
@@ -91,7 +99,7 @@ class PaperTape(Tool, Ui_PaperTape):
         return self.styles.currentText()
 
     def _paper_format(self, stroke):
-        text = [' '] * len(self._all_keys)
+        text = self._all_keys_filler * 1
         keys = stroke.steno_keys[:]
         if any(key in self._numbers for key in keys):
             keys.append('#')
@@ -147,7 +155,7 @@ class PaperTape(Tool, Ui_PaperTape):
     def on_clear(self):
         flags = self.windowFlags()
         msgbox = QMessageBox()
-        msgbox.setText(_("Do you want to clear the paper tape?"))
+        msgbox.setText(_('Do you want to clear the paper tape?'))
         msgbox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         # Make sure the message box ends up above the paper tape!
         msgbox.setWindowFlags(msgbox.windowFlags() | (flags & Qt.WindowStaysOnTopHint))
@@ -162,7 +170,8 @@ class PaperTape(Tool, Ui_PaperTape):
         filename_suggestion = 'steno-notes-%s.txt' % time.strftime('%Y-%m-%d-%H-%M')
         filename = QFileDialog.getSaveFileName(
             self, _('Save Paper Tape'), filename_suggestion,
-            _('Text files') + ' (*.txt)',
+            # i18n: Paper tape, "save" file picker.
+            _('Text files (*.txt)'),
         )[0]
         if not filename:
             return

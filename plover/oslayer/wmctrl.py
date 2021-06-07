@@ -1,46 +1,37 @@
+from plover.oslayer.config import PLATFORM
 
-import sys
 
+if PLATFORM == 'win':
 
-if sys.platform.startswith('win32'):
-
-    from ctypes import windll
+    from ctypes import windll, wintypes
 
     GetForegroundWindow = windll.user32.GetForegroundWindow
+    GetForegroundWindow.argtypes = []
+    GetForegroundWindow.restype = wintypes.HWND
+
     SetForegroundWindow = windll.user32.SetForegroundWindow
+    SetForegroundWindow.argtypes = [
+        wintypes.HWND, # hWnd
+    ]
+    SetForegroundWindow.restype = wintypes.BOOL
 
 
-elif sys.platform.startswith('darwin'):
+elif PLATFORM == 'mac':
 
-    from Foundation import NSAppleScript
+    from Cocoa import NSWorkspace, NSRunningApplication, NSApplicationActivateIgnoringOtherApps
 
     def GetForegroundWindow():
-        return NSAppleScript.alloc().initWithSource_("""
-tell application "System Events"
-    return unix id of first process whose frontmost = true
-end tell""").executeAndReturnError_(None)[0].int32Value()
+        return NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
 
     def SetForegroundWindow(pid):
-        NSAppleScript.alloc().initWithSource_("""
-tell application "System Events"
-    set the frontmost of first process whose unix id is %d to true
-end tell""" % pid).executeAndReturnError_(None)
+        target_window = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        target_window.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
 
+elif PLATFORM in {'linux', 'bsd'}:
 
-elif sys.platform.startswith('linux'):
+    from plover.oslayer.xwmctrl import WmCtrl
 
-    from subprocess import call, check_output, CalledProcessError
+    wmctrl = WmCtrl()
 
-    def GetForegroundWindow():
-        try:
-            output = check_output(['xprop', '-root', '_NET_ACTIVE_WINDOW'])
-            return int(output.split()[-1], 16)
-        except CalledProcessError:
-            return None
-
-    def SetForegroundWindow(w):
-        """Returns focus to previous application."""
-        try:
-            call(['wmctrl', '-i', '-a', str(w)])
-        except CalledProcessError:
-            pass
+    GetForegroundWindow = wmctrl.get_foreground_window
+    SetForegroundWindow = wmctrl.set_foreground_window

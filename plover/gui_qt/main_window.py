@@ -1,6 +1,9 @@
 
 from functools import partial
 import json
+import os
+import sys
+import subprocess
 
 from PyQt5.QtCore import QCoreApplication, Qt
 from PyQt5.QtGui import QCursor, QIcon, QKeySequence
@@ -9,15 +12,15 @@ from PyQt5.QtWidgets import (
     QMenu,
 )
 
-from plover import log
+from plover import _, log
 from plover.oslayer import wmctrl
+from plover.oslayer.config import CONFIG_DIR, PLATFORM
 from plover.registry import registry
 from plover.resource import resource_filename
 
 from plover.gui_qt.log_qt import NotificationHandler
 from plover.gui_qt.main_window_ui import Ui_MainWindow
 from plover.gui_qt.config_window import ConfigWindow
-from plover.gui_qt.dictionaries_widget import DictionariesWidget
 from plover.gui_qt.about_dialog import AboutDialog
 from plover.gui_qt.trayicon import TrayIcon
 from plover.gui_qt.utils import WindowState, find_menu_actions
@@ -28,7 +31,7 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
     ROLE = 'main'
 
     def __init__(self, engine, use_qt_notifications):
-        super(MainWindow, self).__init__()
+        super().__init__()
         self.setupUi(self)
         if hasattr(self, 'setUnifiedTitleAndToolBarOnMac'):
             self.setUnifiedTitleAndToolBarOnMac(True)
@@ -38,22 +41,24 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
             'about'             : AboutDialog,
             'configuration'     : ConfigWindow,
         }
-        self.action_Quit.triggered.connect(QCoreApplication.quit)
         all_actions = find_menu_actions(self.menubar)
         # Dictionaries.
-        self.dictionaries = DictionariesWidget(engine)
+        self.dictionaries = self.scroll_area.widget()
         self.dictionaries.add_translation.connect(self._add_translation)
-        self.scroll_area.setWidget(self.dictionaries)
         self.dictionaries.setFocus()
         edit_menu = all_actions['menu_Edit'].menu()
         edit_menu.addAction(self.dictionaries.action_Undo)
         edit_menu.addSeparator()
-        edit_menu.addAction(self.dictionaries.action_AddDictionaries)
+        edit_menu.addMenu(self.dictionaries.menu_AddDictionaries)
         edit_menu.addAction(self.dictionaries.action_EditDictionaries)
+        edit_menu.addMenu(self.dictionaries.menu_SaveDictionaries)
         edit_menu.addAction(self.dictionaries.action_RemoveDictionaries)
         edit_menu.addSeparator()
         edit_menu.addAction(self.dictionaries.action_MoveDictionariesUp)
         edit_menu.addAction(self.dictionaries.action_MoveDictionariesDown)
+        self.dictionaries.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.dictionaries.customContextMenuRequested.connect(
+            lambda p: edit_menu.exec_(self.dictionaries.mapToGlobal(p)))
         # Tray icon.
         self._trayicon = TrayIcon()
         self._trayicon.enable()
@@ -70,6 +75,7 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
             'menu_Tools',
             '',
             'action_Configure',
+            'action_OpenConfigFolder',
             '',
             'menu_Help',
             '',
@@ -82,6 +88,8 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
                 popup_menu.addSeparator()
         self._trayicon.set_menu(popup_menu)
         engine.signal_connect('machine_state_changed', self._trayicon.update_machine_state)
+        engine.signal_connect('quit', self.on_quit)
+        self.action_Quit.triggered.connect(engine.quit)
         # Populate tools bar/menu.
         tools_menu = all_actions['menu_Tools'].menu()
         # Toolbar popup menu for selecting which tools are shown.
@@ -92,44 +100,34 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
         )
         for tool_plugin in registry.list_plugins('gui.qt.tool'):
             tool = tool_plugin.obj
-            action_parameters = []
+            menu_action = tools_menu.addAction(tool.TITLE)
+            if tool.SHORTCUT is not None:
+                menu_action.setShortcut(QKeySequence.fromString(tool.SHORTCUT))
             if tool.ICON is not None:
                 icon = tool.ICON
                 # Internal QT resources start with a `:`.
                 if not icon.startswith(':'):
                     icon = resource_filename(icon)
-                action_parameters.append(QIcon(icon))
-            action_parameters.append(tool.TITLE)
-            toolbar_action = None
-            for parent in (tools_menu, self.toolbar, self.toolbar_menu):
-                action = parent.addAction(*action_parameters)
-                action.setObjectName(tool_plugin.name)
-                if tool.__doc__ is not None:
-                    action.setToolTip(tool.__doc__)
-                if tool.SHORTCUT is not None:
-                    action.setShortcut(QKeySequence.fromString(tool.SHORTCUT))
-                if parent == self.toolbar_menu:
-                    action.setCheckable(True)
-                    action.setChecked(True)
-                    assert toolbar_action is not None
-                    action.toggled.connect(toolbar_action.setVisible)
-                else:
-                    if parent == self.toolbar:
-                        toolbar_action = action
-                    action.triggered.connect(partial(self._activate_dialog,
-                                                     tool_plugin.name,
-                                                     args=()))
+                menu_action.setIcon(QIcon(icon))
+            menu_action.triggered.connect(partial(self._activate_dialog, tool_plugin.name, args=()))
+            toolbar_action = self.toolbar.addAction(menu_action.icon(), menu_action.text())
+            if tool.__doc__ is not None:
+                toolbar_action.setToolTip(tool.__doc__)
+            toolbar_action.triggered.connect(menu_action.trigger)
+            toggle_action = self.toolbar_menu.addAction(menu_action.icon(), menu_action.text())
+            toggle_action.setObjectName(tool_plugin.name)
+            toggle_action.setCheckable(True)
+            toggle_action.setChecked(True)
+            toggle_action.toggled.connect(toolbar_action.setVisible)
             self._dialog_class[tool_plugin.name] = tool
         engine.signal_connect('output_changed', self.on_output_changed)
         # Machine.
-        self.machine_type.addItems(
-            _(plugin.name)
-            for plugin in registry.list_plugins('machine')
-        )
+        for plugin in registry.list_plugins('machine'):
+            self.machine_type.addItem(_(plugin.name), plugin.name)
         engine.signal_connect('config_changed', self.on_config_changed)
         engine.signal_connect('machine_state_changed',
             lambda machine, state:
-            self.machine_state.setText(_(state.capitalize()))
+            self.machine_state.setText(state.capitalize())
         )
         self.restore_state()
         # Commands.
@@ -138,15 +136,20 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
         engine.signal_connect('configure', partial(self._configure, manage_windows=True))
         engine.signal_connect('lookup', partial(self._activate_dialog, 'lookup',
                                                 manage_windows=True))
+        engine.signal_connect('suggestions', partial(self._activate_dialog, 'suggestions',
+                                                     manage_windows=True))
         # Load the configuration (but do not start the engine yet).
         if not engine.load_config():
             self.on_configure()
         # Apply configuration settings.
         config = self._engine.config
-        self.machine_type.setCurrentText(config['machine_type'])
+        self._update_machine(config['machine_type'])
         self._configured = False
         self.dictionaries.on_config_changed(config)
         self.set_visible(not config['start_minimized'])
+        # Process events before starting the engine
+        # (to avoid display lag at window creation).
+        QCoreApplication.processEvents()
         # Start the engine.
         engine.start()
 
@@ -170,10 +173,10 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
             def on_finished():
                 del self._active_dialogs[name]
                 dialog.deleteLater()
-                if manage_windows:
+                if manage_windows and previous_window is not None:
                     wmctrl.SetForegroundWindow(previous_window)
             dialog.finished.connect(on_finished)
-        dialog.show()
+        dialog.showNormal()
         dialog.activateWindow()
         dialog.raise_()
 
@@ -184,7 +187,7 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
                               manage_windows=manage_windows)
 
     def _focus(self):
-        self.set_visible(True)
+        self.showNormal()
         self.activateWindow()
         self.raise_()
 
@@ -198,19 +201,22 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
         if settings.contains('hidden_toolbar_tools'):
             hidden_toolbar_tools = json.loads(settings.value('hidden_toolbar_tools'))
             for action in self.toolbar_menu.actions():
-                if action.objectName() in hidden_toolbar_tools:
-                    action.setChecked(False)
+                action.setChecked(action.objectName() not in hidden_toolbar_tools)
 
     def _save_state(self, settings):
-        hidden_toolbar_tools = set()
-        for action in self.toolbar_menu.actions():
-            if not action.isChecked():
-                hidden_toolbar_tools.add(action.objectName())
+        hidden_toolbar_tools = {
+            action.objectName()
+            for action in self.toolbar_menu.actions()
+            if not action.isChecked()
+        }
         settings.setValue('hidden_toolbar_tools', json.dumps(list(sorted(hidden_toolbar_tools))))
+
+    def _update_machine(self, machine_type):
+        self.machine_type.setCurrentIndex(self.machine_type.findData(machine_type))
 
     def on_config_changed(self, config_update):
         if 'machine_type' in config_update:
-            self.machine_type.setCurrentText(config_update['machine_type'])
+            self._update_machine(config_update['machine_type'])
         if not self._configured:
             self._configured = True
             if config_update.get('show_suggestions_display', False):
@@ -218,8 +224,8 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
             if config_update.get('show_stroke_display', False):
                 self._activate_dialog('paper_tape')
 
-    def on_machine_changed(self, machine_type):
-        self._engine.config = { 'machine_type': machine_type }
+    def on_machine_changed(self, machine_index):
+        self._engine.config = { 'machine_type': self.machine_type.itemData(machine_index) }
 
     def on_output_changed(self, enabled):
         self._trayicon.update_output(enabled)
@@ -239,6 +245,14 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
     def on_configure(self):
         self._configure()
 
+    def on_open_config_folder(self):
+        if PLATFORM == 'win':
+            os.startfile(CONFIG_DIR)
+        elif PLATFORM == 'linux':
+            subprocess.call(['xdg-open', CONFIG_DIR])
+        elif PLATFORM == 'mac':
+            subprocess.call(['open', CONFIG_DIR])
+
     def on_reconnect(self):
         self._engine.reset_machine()
 
@@ -254,14 +268,13 @@ class MainWindow(QMainWindow, Ui_MainWindow, WindowState):
         self.save_state()
         self._trayicon.disable()
         self.hide()
+        QCoreApplication.quit()
 
     def on_show(self):
         self._focus()
 
     def closeEvent(self, event):
-        if self._trayicon.is_enabled():
-            self.hide()
-            event.ignore()
-        else:
-            QCoreApplication.quit()
-            event.accept()
+        self.hide()
+        if not self._trayicon.is_enabled():
+            self._engine.quit()
+        event.ignore()

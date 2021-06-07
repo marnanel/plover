@@ -1,13 +1,10 @@
 import json
 from collections import defaultdict, OrderedDict
 
-# Python 2/3 compatibility.
-from six import string_types
-
 from plover import log
 
 
-class Keymap(object):
+class Keymap:
 
     def __init__(self, keys, actions):
         # List of supported actions.
@@ -24,6 +21,12 @@ class Keymap(object):
         # key -> action
         self._bindings = {}
 
+    def get_keys(self):
+        return self._keys.keys()
+
+    def get_actions(self):
+        return self._actions.keys()
+
     def set_bindings(self, bindings):
         # Set from:
         # { key1: action1, key2: action1, ... keyn: actionn }
@@ -35,7 +38,7 @@ class Keymap(object):
     def set_mappings(self, mappings):
         # When setting from a string, assume a list of mappings:
         # [[action1, [key1, key2]], [action2, [key3]], ...]
-        if isinstance(mappings, string_types):
+        if isinstance(mappings, str):
             mappings = json.loads(mappings)
         mappings = dict(mappings)
         # Set from:
@@ -54,7 +57,7 @@ class Keymap(object):
                 # so it's shown in the configurator.
                 self._mappings[action] = ()
                 continue
-            if isinstance(key_list, string_types):
+            if isinstance(key_list, str):
                 key_list = (key_list,)
             valid_key_list = []
             for key in key_list:
@@ -67,7 +70,7 @@ class Keymap(object):
             self._mappings[action] = tuple(sorted(valid_key_list, key=self._keys.get))
         for action in (set(mappings) - set(self._actions)):
             key_list = mappings.get(action)
-            if isinstance(key_list, string_types):
+            if isinstance(key_list, str):
                 key_list = (key_list,)
             errors.append('invalid action %s mapped to key(s) %s' % (action, ' '.join(key_list)))
         for key, action_list in bound_keys.items():
@@ -108,7 +111,7 @@ class Keymap(object):
 
     def __setitem__(self, action, key_list):
         assert action in self._actions
-        if isinstance(key_list, string_types):
+        if isinstance(key_list, str):
             key_list = (key_list,)
         # Delete previous bindings.
         if action in self._mappings:
@@ -134,7 +137,7 @@ class Keymap(object):
         return iter(self._mappings)
 
     def __eq__(self, other):
-        return self._mappings == other.get_mappings()
+        return self.get_mappings() == other.get_mappings()
 
     def __str__(self):
         # Use the more compact list of mappings format:

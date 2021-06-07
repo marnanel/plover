@@ -3,9 +3,6 @@ from operator import attrgetter, itemgetter
 from collections import namedtuple
 from itertools import chain
 
-# Python 2/3 compatibility.
-from six import iteritems
-
 from PyQt5.QtCore import (
     QAbstractTableModel,
     QModelIndex,
@@ -17,6 +14,7 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate,
 )
 
+from plover import _
 from plover.translation import escape_translation, unescape_translation
 from plover.misc import expand_path, shorten_path
 from plover.steno import normalize_steno
@@ -32,32 +30,32 @@ class DictionaryItem(namedtuple('DictionaryItem', 'strokes translation dictionar
 
     @property
     def dictionary_path(self):
-        return self.dictionary.get_path()
+        return self.dictionary.path
 
 
 class DictionaryItemDelegate(QStyledItemDelegate):
 
     def __init__(self, dictionary_list):
-        super(DictionaryItemDelegate, self).__init__()
+        super().__init__()
         self._dictionary_list = dictionary_list
 
     def createEditor(self, parent, option, index):
         if index.column() == _COL_DICT:
             dictionary_paths = [
-                shorten_path(dictionary.get_path())
+                shorten_path(dictionary.path)
                 for dictionary in self._dictionary_list
                 if not dictionary.readonly
             ]
             combo = QComboBox(parent)
             combo.addItems(dictionary_paths)
             return combo
-        return super(DictionaryItemDelegate, self).createEditor(parent, option, index)
+        return super().createEditor(parent, option, index)
 
 
 class DictionaryItemModel(QAbstractTableModel):
 
     def __init__(self, dictionary_list, sort_column, sort_order):
-        super(DictionaryItemModel, self).__init__()
+        super().__init__()
         self._dictionary_list = dictionary_list
         self._operations = []
         self._entries = []
@@ -68,7 +66,7 @@ class DictionaryItemModel(QAbstractTableModel):
     def _update_entries(self, strokes_filter=None, translation_filter=None):
         self._entries = []
         for dictionary in self._dictionary_list:
-            for strokes, translation in iteritems(dictionary):
+            for strokes, translation in dictionary.items():
                 if strokes_filter is not None and \
                    not '/'.join(strokes).startswith(strokes_filter):
                     continue
@@ -94,9 +92,9 @@ class DictionaryItemModel(QAbstractTableModel):
                 if item is None:
                     continue
                 dictionary = item.dictionary
-                if dictionary.get_path() in paths:
+                if dictionary.path in paths:
                     continue
-                paths.add(dictionary.get_path())
+                paths.add(dictionary.path)
                 dictionary_list.append(dictionary)
         return dictionary_list
 
@@ -162,10 +160,13 @@ class DictionaryItemModel(QAbstractTableModel):
         if orientation != Qt.Horizontal or role != Qt.DisplayRole:
             return None
         if section == _COL_STENO:
+            # i18n: Widget: “DictionaryEditor”.
             return _('Strokes')
         if section == _COL_TRANS:
+            # i18n: Widget: “DictionaryEditor”.
             return _('Translation')
         if section == _COL_DICT:
+            # i18n: Widget: “DictionaryEditor”.
             return _('Dictionary')
 
     def data(self, index, role):
@@ -178,7 +179,7 @@ class DictionaryItemModel(QAbstractTableModel):
         if column == _COL_TRANS:
             return escape_translation(item.translation)
         if column == _COL_DICT:
-            return shorten_path(item.dictionary.get_path())
+            return shorten_path(item.dictionary.path)
 
     def flags(self, index):
         if not index.isValid():
@@ -223,7 +224,7 @@ class DictionaryItemModel(QAbstractTableModel):
         elif column == _COL_DICT:
             path = expand_path(value)
             for dictionary in self._dictionary_list:
-                if dictionary.get_path() == path:
+                if dictionary.path == path:
                     break
             if dictionary == old_item.dictionary:
                 return False
@@ -279,14 +280,14 @@ class DictionaryEditor(QDialog, Ui_DictionaryEditor, WindowState):
     ROLE = 'dictionary_editor'
 
     def __init__(self, engine, dictionary_paths):
-        super(DictionaryEditor, self).__init__()
+        super().__init__()
         self.setupUi(self)
         self._engine = engine
         with engine:
             dictionary_list = [
                 dictionary
                 for dictionary in engine.dictionaries.dicts
-                if dictionary.get_path() in dictionary_paths
+                if dictionary.path in dictionary_paths
             ]
         sort_column, sort_order = _COL_STENO, Qt.AscendingOrder
         self._model = DictionaryItemModel(dictionary_list,
@@ -364,11 +365,13 @@ class DictionaryEditor(QDialog, Ui_DictionaryEditor, WindowState):
             row = self._selection[0]
         else:
             row = 0
+        self.table.reset()
         self._model.new_row(row)
         self._select(row, edit=True)
         self.action_Undo.setEnabled(self._model.has_undo)
 
     def on_apply_filter(self):
+        self.table.selectionModel().clear()
         strokes_filter = '/'.join(normalize_steno(self.strokes_filter.text().strip()))
         translation_filter = unescape_translation(self.translation_filter.text().strip())
         self._model.filter(strokes_filter=strokes_filter,
@@ -381,6 +384,6 @@ class DictionaryEditor(QDialog, Ui_DictionaryEditor, WindowState):
 
     def on_finished(self, result):
         with self._engine:
-            self._engine.dictionaries.save(dictionary.get_path()
+            self._engine.dictionaries.save(dictionary.path
                                            for dictionary
                                            in self._model.modified)

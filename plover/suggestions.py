@@ -1,9 +1,12 @@
 import collections
 
+from plover.steno import sort_steno_strokes
+
+
 Suggestion = collections.namedtuple('Suggestion', 'text steno_list')
 
 
-class Suggestions(object):
+class Suggestions:
     def __init__(self, dictionary):
         self.dictionary = dictionary
 
@@ -11,18 +14,18 @@ class Suggestions(object):
         suggestions = []
 
         mods = [
-            u'%s',  # Same
-            u'{^%s}',  # Prefix
-            u'{^}%s',
-            u'{^%s^}',  # Infix
-            u'{^}%s{^}',
-            u'{%s^}',  # Suffix
-            u'%s{^}',
-            u'{&%s}',  # Fingerspell
-            u'{#%s}',  # Command
+            '%s',  # Same
+            '{^%s}',  # Prefix
+            '{^}%s',
+            '{^%s^}',  # Infix
+            '{^}%s{^}',
+            '{%s^}',  # Suffix
+            '%s{^}',
+            '{&%s}',  # Fingerspell
+            '{#%s}',  # Command
         ]
 
-        possible_translations = set([translation])
+        possible_translations = {translation}
 
         # Only strip spaces, so patterns with \n or \t are correctly handled.
         stripped_translation = translation.strip(' ')
@@ -35,18 +38,14 @@ class Suggestions(object):
 
         similar_words = self.dictionary.casereverse_lookup(translation.lower())
         if similar_words:
-            possible_translations |= similar_words
+            possible_translations |= set(similar_words)
 
         for t in possible_translations:
             for modded_translation in [mod % t for mod in mods]:
                 strokes_list = self.dictionary.reverse_lookup(modded_translation)
                 if not strokes_list:
                     continue
-                # Return suggestions, sorted by fewest strokes, then fewest keys
-                strokes_list = sorted(
-                    strokes_list,
-                    key=lambda x: (len(x), sum(map(len, x)))
-                )
+                strokes_list = sort_steno_strokes(strokes_list)
                 suggestion = Suggestion(modded_translation, strokes_list)
                 suggestions.append(suggestion)
 

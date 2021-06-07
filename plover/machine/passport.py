@@ -3,9 +3,7 @@
 
 "Thread-based monitoring of a stenotype machine using the passport protocol."
 
-# Python 2/3 compatibility.
-from six import iterbytes
-from six.moves import zip_longest
+from itertools import zip_longest
 
 from plover.machine.base import SerialStenotypeBase
 
@@ -23,8 +21,11 @@ class Passport(SerialStenotypeBase):
         ! ^ +
     '''
 
+    SERIAL_PARAMS = dict(SerialStenotypeBase.SERIAL_PARAMS)
+    SERIAL_PARAMS.update(baudrate=38400)
+
     def __init__(self, params):
-        super(Passport, self).__init__(params)
+        super().__init__(params)
         self.packet = []
 
     def _read(self, b):
@@ -51,26 +52,10 @@ class Passport(SerialStenotypeBase):
 
         while not self.finished.isSet():
             # Grab data from the serial port.
-            raw = self.serial_port.read(self.serial_port.inWaiting())
+            raw = self.serial_port.read(max(1, self.serial_port.inWaiting()))
 
-            for b in iterbytes(raw):
+            for b in raw:
                 self._read(b)
-
-    @classmethod
-    def get_option_info(cls):
-        """Get the default options for this machine."""
-        bool_converter = lambda s: s == 'True'
-        sb = lambda s: int(float(s)) if float(s).is_integer() else float(s)
-        return {
-            'port': (None, str), # TODO: make first port default
-            'baudrate': (38400, int),
-            'bytesize': (8, int),
-            'parity': ('N', str),
-            'stopbits': (1, sb),
-            'timeout': (2.0, float),
-            'xonxoff': (False, bool_converter),
-            'rtscts': (False, bool_converter)
-        }
 
 
 def grouper(iterable, n, fillvalue=None):
@@ -78,4 +63,3 @@ def grouper(iterable, n, fillvalue=None):
     # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
     args = [iter(iterable)] * n
     return zip_longest(fillvalue=fillvalue, *args)
-

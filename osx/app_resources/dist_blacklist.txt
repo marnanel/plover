@@ -1,0 +1,69 @@
+# Python.
+:
+  _CodeSignature
+  share
+  Resources
+:bin
+  !python
+  !python3*
+  !Info.plist
+  *
+:lib
+  **/*.tcl
+  itcl*
+  pkgconfig
+  tcl*
+  [Tt]k*
+:lib/python$python_base_version
+  pkgconfig
+  tkinter
+  idlelib
+  ensurepip
+  test
+  turtle*
+  **/*.exe
+  */test*
+# PyQt5.
+:lib/python$python_base_version/site-packages/PyQt5
+  **/*AxContainer*
+  **/*Bluetooth*
+  **/*CLucene*
+  **/*Designer*
+  **/*Location*
+  **/*Nfc*
+  **/*Sensors*
+  **/*Serial*
+  **/*Sql*
+  **/*Test*
+  Qt5/plugins/audio
+  Qt5/plugins/bearer
+  Qt5/plugins/generic
+  Qt5/plugins/geoservices
+  Qt5/plugins/mediaservice
+  Qt5/plugins/playlistformats
+  Qt5/plugins/position
+  Qt5/plugins/printsupport
+  Qt5/plugins/sceneparsers
+  Qt5/plugins/sensor*
+  Qt5/plugins/sqldrivers
+  Qt5/qml
+  Qt5/resources
+  Qt5/translations/qt_help_*
+  Qt5/translations/qtconnectivity_*
+  Qt5/translations/qtdeclarative_*
+  Qt5/translations/qtlocation_*
+  Qt5/translations/qtmultimedia_*
+  Qt5/translations/qtquick*
+  Qt5/translations/qtserialport_*
+  Qt5/translations/qtwebsockets_*
+  pylupdate*
+  pyrcc*
+  uic
+# Plover.
+:lib/python$python_base_version/site-packages/plover
+  gui_qt/*.ui
+  gui_qt/resources
+  messages/**/*.po
+  messages/plover.pot
+
+# vim: ft=config

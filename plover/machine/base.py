@@ -6,21 +6,27 @@
 
 """Base classes for machine types. Do not use directly."""
 
+import binascii
 import threading
 
 import serial
 
-from plover import log
+from plover import _, log
 from plover.machine.keymap import Keymap
+from plover.misc import boolean
 
 
-STATE_STOPPED = 'stopped'
-STATE_INITIALIZING = 'initializing'
-STATE_RUNNING = 'connected'
-STATE_ERROR = 'disconnected'
+# i18n: Machine state.
+STATE_STOPPED = _('stopped')
+# i18n: Machine state.
+STATE_INITIALIZING = _('initializing')
+# i18n: Machine state.
+STATE_RUNNING = _('connected')
+# i18n: Machine state.
+STATE_ERROR = _('disconnected')
 
 
-class StenotypeBase(object):
+class StenotypeBase:
     """The base class for all Stenotype classes."""
 
     # Layout of physical keys.
@@ -128,7 +134,7 @@ class StenotypeBase(object):
 
     @classmethod
     def get_keys(cls):
-        return tuple(set(cls.KEYS_LAYOUT.split()))
+        return tuple(cls.KEYS_LAYOUT.split())
 
     @classmethod
     def get_option_info(cls):
@@ -175,6 +181,16 @@ class SerialStenotypeBase(ThreadedStenotypeBase):
 
     """
 
+    # Default serial parameters.
+    SERIAL_PARAMS = {
+        'port': None,
+        'baudrate': 9600,
+        'bytesize': 8,
+        'parity': 'N',
+        'stopbits': 1,
+        'timeout': 2.0,
+    }
+
     def __init__(self, serial_params):
         """Monitor the stenotype over a serial port.
 
@@ -217,15 +233,48 @@ class SerialStenotypeBase(ThreadedStenotypeBase):
     @classmethod
     def get_option_info(cls):
         """Get the default options for this machine."""
-        bool_converter = lambda s: s == 'True'
         sb = lambda s: int(float(s)) if float(s).is_integer() else float(s)
-        return {
-            'port': (None, str), # TODO: make first port default
-            'baudrate': (9600, int),
-            'bytesize': (8, int),
-            'parity': ('N', str),
-            'stopbits': (1, sb),
-            'timeout': (2.0, float),
-            'xonxoff': (False, bool_converter),
-            'rtscts': (False, bool_converter)
+        converters = {
+            'port': str,
+            'baudrate': int,
+            'bytesize': int,
+            'parity': str,
+            'stopbits': sb,
+            'timeout': float,
+            'xonxoff': boolean,
+            'rtscts': boolean,
         }
+        return {
+            setting: (default, converters[setting])
+            for setting, default in cls.SERIAL_PARAMS.items()
+        }
+
+    def _iter_packets(self, packet_size):
+        """Yield packets of <packets_size> bytes until the machine is stopped.
+
+        N.B.: to workaround the fact that the Toshiba Bluetooth stack
+        on Windows does not correctly handle the read timeout setting
+        (returning immediately if some data is already available):
+        - the effective timeout is re-configured to <timeout/packet_size>
+        - multiple reads are  done (until a packet is complete)
+        - an incomplete packet will only be discarded if one of
+          those reads return no data (but not on short read)
+        """
+        self.serial_port.timeout = max(
+            self.serial_params.get('timeout', 1.0) / packet_size,
+            0.01,
+        )
+        packet = b''
+        while not self.finished.isSet():
+            raw = self.serial_port.read(packet_size - len(packet))
+            if not raw:
+                if packet:
+                    log.error('discarding incomplete packet: %s',
+                              binascii.hexlify(packet))
+                packet = b''
+                continue
+            packet += raw
+            if len(packet) != packet_size:
+                continue
+            yield packet
+            packet = b''

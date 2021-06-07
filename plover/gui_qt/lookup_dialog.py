@@ -1,20 +1,17 @@
 
 from PyQt5.QtCore import QEvent, Qt
 
+from plover import _
 from plover.translation import unescape_translation
 
 from plover.gui_qt.lookup_dialog_ui import Ui_LookupDialog
-from plover.gui_qt.suggestions_widget import SuggestionsWidget
-from plover.gui_qt.i18n import get_gettext
 from plover.gui_qt.tool import Tool
-
-
-_ = get_gettext()
 
 
 class LookupDialog(Tool, Ui_LookupDialog):
 
-    ''' Search the dictionary for translations. '''
+    # i18n: Widget: “LookupDialog”, tooltip.
+    __doc__ = _('Search the dictionary for translations.')
 
     TITLE = _('Lookup')
     ICON = ':/lookup.svg'
@@ -22,11 +19,8 @@ class LookupDialog(Tool, Ui_LookupDialog):
     SHORTCUT = 'Ctrl+L'
 
     def __init__(self, engine):
-        super(LookupDialog, self).__init__(engine)
+        super().__init__(engine)
         self.setupUi(self)
-        suggestions = SuggestionsWidget()
-        self.layout().replaceWidget(self.suggestions, suggestions)
-        self.suggestions = suggestions
         self.pattern.installEventFilter(self)
         self.suggestions.installEventFilter(self)
         self.pattern.setFocus()
@@ -47,3 +41,9 @@ class LookupDialog(Tool, Ui_LookupDialog):
         translation = unescape_translation(pattern.strip())
         suggestion_list = self._engine.get_suggestions(translation)
         self._update_suggestions(suggestion_list)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.ActivationChange and self.isActiveWindow():
+            self.pattern.setFocus()
+            self.pattern.selectAll()

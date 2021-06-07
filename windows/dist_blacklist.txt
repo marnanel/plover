@@ -2,52 +2,20 @@
   Scripts
 # PyQt5.
 :Lib/site-packages/PyQt5
-  **/*AxContainer*
-  **/*Bluetooth*
-  **/*CLucene*
-  **/*DBus*
   **/*Designer*
-  **/*Help*
-  **/*Location*
-  **/*Multimedia*
-  **/*Network*
-  **/*Nfc*
-  **/*OpenGL*
-  **/*Position*
-  **/*Print*
-  **/*Qml*
-  **/*Quick*
-  **/*Sensors*
-  **/*Serial*
-  **/*Sql*
+  **/*[Hh]elp*
   **/*Test*
-  **/*Web*
-  **/*WinExtras*
-  **/*Xml*
-  **/*qtwebengine*
-  Qt/bin/libeay32.dll
-  Qt/bin/ssleay32.dll
-  Qt/plugins/audio
-  Qt/plugins/bearer
-  Qt/plugins/generic
-  Qt/plugins/geoservices
-  Qt/plugins/mediaservice
-  Qt/plugins/playlistformats
-  Qt/plugins/position
-  Qt/plugins/printsupport
-  Qt/plugins/sceneparsers
-  Qt/plugins/sensor*
-  Qt/plugins/sqldrivers
-  Qt/qml
-  Qt/resources
-  Qt/translations/qt_help_*
-  Qt/translations/qtconnectivity_*
-  Qt/translations/qtdeclarative_*
-  Qt/translations/qtlocation_*
-  Qt/translations/qtmultimedia_*
-  Qt/translations/qtquick*
-  Qt/translations/qtserialport_*
-  Qt/translations/qtwebsockets_*
+  **/*Qml*
+  **/*[Qq]uick*
+  **/*[Ww]eb[Ee]ngine*
+  bindings
+  Qt5/bin/libeay32.dll
+  Qt5/bin/ssleay32.dll
+  Qt5/plugins/platforms/qminimal.dll
+  Qt5/plugins/platforms/qoffscreen.dll
+  Qt5/plugins/platforms/qwebgl.dll
+  Qt5/plugins/sceneparsers
+  Qt5/qml
   pylupdate*
   pyrcc*
   uic
@@ -55,6 +23,8 @@
 :Lib/site-packages/plover
   gui_qt/*.ui
   gui_qt/*.ui
-  gui_qt/messages/**/*.po
-  gui_qt/messages/plover.pot
   gui_qt/resources
+  messages/**/*.po
+  messages/plover.pot
+
+# vim: ft=config

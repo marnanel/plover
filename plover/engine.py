@@ -1,20 +1,20 @@
 
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from functools import wraps
+from queue import Queue
 import os
 import shutil
 import threading
 
-# Python 2/3 compatibility.
-from six.moves.queue import Queue
-
 from plover import log, system
 from plover.dictionary.loading_manager import DictionaryLoadingManager
-from plover.exception import InvalidConfigurationError
+from plover.exception import DictionaryLoaderException
 from plover.formatting import Formatter
+from plover.misc import shorten_path
 from plover.registry import registry
 from plover.resource import ASSET_SCHEME, resource_filename
 from plover.steno import Stroke
+from plover.steno_dictionary import StenoDictionary, StenoDictionaryCollection
 from plover.suggestions import Suggestions
 from plover.translation import Translator
 
@@ -22,6 +22,22 @@ from plover.translation import Translator
 StartingStrokeState = namedtuple('StartingStrokeState', 'attach capitalize')
 
 MachineParams = namedtuple('MachineParams', 'type options keymap')
+
+
+class ErroredDictionary(StenoDictionary):
+    """ Placeholder for dictionaries that failed to load. """
+
+    def __init__(self, path, exception):
+        super().__init__()
+        self.enabled = False
+        self.readonly = True
+        self.path = path
+        self.exception = exception
+
+    def __eq__(self, other):
+        if not isinstance(other, ErroredDictionary):
+            return False
+        return (self.path, self.exception) == (other.path, other.exception)
 
 
 def copy_default_dictionaries(dictionaries_files):
@@ -40,7 +56,7 @@ def copy_default_dictionaries(dictionaries_files):
             continue
         # Check it's actually a default dictionary.
         basename = os.path.basename(dictionary)
-        if not basename in system.DEFAULT_DICTIONARIES:
+        if basename not in system.DEFAULT_DICTIONARIES:
             continue
         default_dictionary = os.path.join(system.DICTIONARIES_ROOT, basename)
         log.info('recreating %s from %s', dictionary, default_dictionary)
@@ -56,7 +72,7 @@ def with_lock(func):
     return _with_lock
 
 
-class StenoEngine(object):
+class StenoEngine:
 
     HOOKS = '''
     stroked
@@ -64,6 +80,7 @@ class StenoEngine(object):
     machine_state_changed
     output_changed
     config_changed
+    dictionaries_loaded
     send_string
     send_backspaces
     send_key_combination
@@ -71,11 +88,13 @@ class StenoEngine(object):
     focus
     configure
     lookup
+    suggestions
     quit
     '''.split()
 
-    def __init__(self, config, keyboard_emulation):
+    def __init__(self, config, controller, keyboard_emulation):
         self._config = config
+        self._controller = controller
         self._is_running = False
         self._queue = Queue()
         self._lock = threading.RLock()
@@ -83,7 +102,12 @@ class StenoEngine(object):
         self._machine_state = None
         self._machine_params = MachineParams(None, None, None)
         self._formatter = Formatter()
-        self._formatter.set_output(self)
+        self._formatter.set_output(Formatter.output_type(
+            self._send_backspaces,
+            self._send_string,
+            self._send_key_combination,
+            self._send_engine_command,
+        ))
         self._formatter.add_listener(self._on_translated)
         self._translator = Translator()
         self._translator.add_listener(log.translation)
@@ -91,7 +115,6 @@ class StenoEngine(object):
         self._dictionaries = self._translator.get_dictionary()
         self._dictionaries_manager = DictionaryLoadingManager()
         self._running_state = self._translator.get_state()
-        self._suggestions = Suggestions(self._dictionaries)
         self._keyboard_emulation = keyboard_emulation
         self._hooks = { hook: [] for hook in self.HOOKS }
         self._running_extensions = {}
@@ -122,15 +145,39 @@ class StenoEngine(object):
             except Exception:
                 log.error('engine %s failed', func.__name__[1:], exc_info=True)
 
+    def _on_control_message(self, msg):
+        if msg[0] == 'command':
+            self._same_thread_hook(self._execute_engine_command,
+                                   *msg[1:], force=True)
+        else:
+            log.error('ignoring invalid control message: %r', msg)
+
     def _stop(self):
+        self._controller.stop()
         self._stop_extensions(self._running_extensions.keys())
         if self._machine is not None:
             self._machine.stop_capture()
             self._machine = None
 
     def _start(self):
-        self._set_output(self._config.get_auto_start())
+        self._set_output(self._config['auto_start'])
         self._update(full=True)
+        self._controller.start(self._on_control_message)
+
+    def _set_dictionaries(self, dictionaries):
+        def dictionaries_changed(l1, l2):
+            if len(l1) != len(l2):
+                return True
+            for d1, d2 in zip(l1, l2):
+                if d1 is not d2:
+                    return True
+            return False
+        if not dictionaries_changed(dictionaries, self._dictionaries.dicts):
+            # No change.
+            return
+        self._dictionaries = StenoDictionaryCollection(dictionaries)
+        self._translator.set_dictionary(self._dictionaries)
+        self._trigger_hook('dictionaries_loaded', self._dictionaries)
 
     def _update(self, config_update=None, full=False, reset_machine=False):
         original_config = self._config.as_dict()
@@ -149,12 +196,9 @@ class StenoEngine(object):
                 for option, value in config.items()
                 if value != original_config[option]
             }
-            if 'machine_type' in config_update:
-                for opt in (
-                    'machine_specific_options',
-                    'system_keymap',
-                ):
-                    config_update[opt] = config[opt]
+            # Save config if anything changed.
+            if config_update:
+                self._config.save()
         # Update logging.
         log.set_stroke_filename(config['log_file_name'])
         log.enable_stroke_logging(config['enable_stroke_logging'])
@@ -175,18 +219,18 @@ class StenoEngine(object):
         machine_params = MachineParams(config['machine_type'],
                                        config['machine_specific_options'],
                                        config['system_keymap'])
-        if reset_machine or machine_params != self._machine_params:
+        # Do not reset if only the keymap changed.
+        if self._machine_params is None or \
+           self._machine_params.type != machine_params.type or \
+           self._machine_params.options != machine_params.options:
+            reset_machine = True
+        if reset_machine:
             if self._machine is not None:
                 self._machine.stop_capture()
                 self._machine = None
-            machine_type = config['machine_type']
-            machine_options = config['machine_specific_options']
-            try:
-                machine_class = registry.get_plugin('machine', machine_type).obj
-            except Exception as e:
-                raise InvalidConfigurationError(str(e))
-            log.info('setting machine: %s', machine_type)
-            self._machine = machine_class(machine_options)
+            machine_class = registry.get_plugin('machine', machine_params.type).obj
+            log.info('setting machine: %s', machine_params.type)
+            self._machine = machine_class(machine_params.options)
             self._machine.set_suppression(self._is_running)
             self._machine.add_state_callback(self._machine_state_callback)
             self._machine.add_stroke_callback(self._machine_stroke_callback)
@@ -201,25 +245,51 @@ class StenoEngine(object):
                 self._machine.set_keymap(machine_keymap)
         if start_machine:
             self._machine.start_capture()
-        # Update dictionaries.
-        dictionaries_files = config['dictionary_file_names']
-        copy_default_dictionaries(dictionaries_files)
-        dictionaries = self._dictionaries_manager.load(dictionaries_files)
-        self._dictionaries.set_dicts(dictionaries)
         # Update running extensions.
         enabled_extensions = config['enabled_extensions']
-        running_extensons = set(self._running_extensions)
-        self._stop_extensions(running_extensons - enabled_extensions)
-        self._start_extensions(enabled_extensions - running_extensons)
+        running_extensions = set(self._running_extensions)
+        self._stop_extensions(running_extensions - enabled_extensions)
+        self._start_extensions(enabled_extensions - running_extensions)
         # Trigger `config_changed` hook.
         if config_update:
             self._trigger_hook('config_changed', config_update)
+        # Update dictionaries.
+        config_dictionaries = OrderedDict(
+            (d.path, d)
+            for d in config['dictionaries']
+        )
+        copy_default_dictionaries(config_dictionaries.keys())
+        # Start by unloading outdated dictionaries.
+        self._dictionaries_manager.unload_outdated()
+        self._set_dictionaries([
+            d for d in self._dictionaries.dicts
+            if d.path in config_dictionaries and \
+               d.path in self._dictionaries_manager
+        ])
+        # And then (re)load all dictionaries.
+        dictionaries = []
+        for result in self._dictionaries_manager.load(config_dictionaries.keys()):
+            if isinstance(result, DictionaryLoaderException):
+                d = ErroredDictionary(result.path, result.exception)
+                # Only show an error if it's new.
+                if d != self._dictionaries.get(result.path):
+                    log.error('loading dictionary `%s` failed: %s',
+                              shorten_path(result.path), str(result.exception))
+            else:
+                d = result
+            d.enabled = config_dictionaries[d.path].enabled
+            dictionaries.append(d)
+        self._set_dictionaries(dictionaries)
 
     def _start_extensions(self, extension_list):
         for extension_name in extension_list:
-            log.info('starting `%s` extension' % extension_name)
+            log.info('starting `%s` extension', extension_name)
             try:
                 extension = registry.get_plugin('extension', extension_name).obj(self)
+            except KeyError:
+                # Plugin not installed, skip.
+                continue
+            try:
                 extension.start()
             except Exception:
                 log.error('initializing extension `%s` failed', extension_name, exc_info=True)
@@ -228,13 +298,15 @@ class StenoEngine(object):
 
     def _stop_extensions(self, extension_list):
         for extension_name in list(extension_list):
-            log.info('stopping `%s` extension' % extension_name)
+            log.info('stopping `%s` extension', extension_name)
             extension = self._running_extensions.pop(extension_name)
             extension.stop()
             del extension
 
-    def _quit(self):
+    def _quit(self, code):
         self._stop()
+        self.code = code
+        self._trigger_hook('quit')
         return True
 
     def _toggle_output(self):
@@ -262,37 +334,43 @@ class StenoEngine(object):
     def _on_machine_state_changed(self, machine_state):
         assert machine_state is not None
         self._machine_state = machine_state
-        machine_type = self._config.get_machine_type()
-        self._trigger_hook('machine_state_changed', machine_type, machine_state)
+        self._trigger_hook('machine_state_changed', self._machine_params.type, machine_state)
 
-    def _consume_engine_command(self, command):
+    def _consume_engine_command(self, command, force=False):
         # The first commands can be used whether plover has output enabled or not.
-        if command == 'RESUME':
+        command_name, *command_args = command.split(':', 1)
+        command_name = command_name.lower()
+        if command_name == 'resume':
             self._set_output(True)
             return True
-        elif command == 'TOGGLE':
+        elif command_name == 'toggle':
             self._toggle_output()
             return True
-        elif command == 'QUIT':
-            self._trigger_hook('quit')
+        elif command_name == 'quit':
+            self.quit()
             return True
-        if not self._is_running:
+        if not force and not self._is_running:
             return False
         # These commands can only be run when plover has output enabled.
-        if command == 'SUSPEND':
+        if command_name == 'suspend':
             self._set_output(False)
-        elif command == 'CONFIGURE':
+        elif command_name == 'configure':
             self._trigger_hook('configure')
-        elif command == 'FOCUS':
+        elif command_name == 'focus':
             self._trigger_hook('focus')
-        elif command == 'ADD_TRANSLATION':
+        elif command_name == 'add_translation':
             self._trigger_hook('add_translation')
-        elif command == 'LOOKUP':
+        elif command_name == 'lookup':
             self._trigger_hook('lookup')
+        elif command_name == 'suggestions':
+            self._trigger_hook('suggestions')
         else:
-            command_args = command.split(':', 2)
-            command_fn = registry.get_plugin('command', command_args[0]).obj
-            command_fn(self, command_args[1] if len(command_args) == 2 else '')
+            command_fn = registry.get_plugin('command', command_name).obj
+            command_fn(self, command_args[0] if command_args else '')
+        return False
+
+    def _execute_engine_command(self, command, force=False):
+        self._consume_engine_command(command, force=force)
         return False
 
     def _on_stroked(self, steno_keys):
@@ -306,25 +384,25 @@ class StenoEngine(object):
             return
         self._trigger_hook('translated', old, new)
 
-    def send_backspaces(self, b):
+    def _send_backspaces(self, b):
         if not self._is_running:
             return
         self._keyboard_emulation.send_backspaces(b)
         self._trigger_hook('send_backspaces', b)
 
-    def send_string(self, s):
+    def _send_string(self, s):
         if not self._is_running:
             return
         self._keyboard_emulation.send_string(s)
         self._trigger_hook('send_string', s)
 
-    def send_key_combination(self, c):
+    def _send_key_combination(self, c):
         if not self._is_running:
             return
         self._keyboard_emulation.send_key_combination(c)
         self._trigger_hook('send_key_combination', c)
 
-    def send_engine_command(self, command):
+    def _send_engine_command(self, command):
         suppress = not self._is_running
         suppress &= self._consume_engine_command(command)
         if suppress:
@@ -359,15 +437,21 @@ class StenoEngine(object):
     def config(self, update):
         self._same_thread_hook(self._update, config_update=update)
 
+    @with_lock
+    def __getitem__(self, setting):
+        return self._config[setting]
+
+    def __setitem__(self, setting, value):
+        self.config = {setting: value}
+
     def reset_machine(self):
         self._same_thread_hook(self._update, reset_machine=True)
 
     def load_config(self):
         try:
-            with open(self._config.target_file, 'rb') as f:
-                self._config.load(f)
+            self._config.load()
         except Exception:
-            log.error('loading configuration failed, reseting to default', exc_info=True)
+            log.error('loading configuration failed, resetting to default', exc_info=True)
             self._config.clear()
             return False
         return True
@@ -375,16 +459,17 @@ class StenoEngine(object):
     def start(self):
         self._same_thread_hook(self._start)
 
-    def quit(self):
-        self._same_thread_hook(self._quit)
+    def quit(self, code=0):
+        # We need to go through the queue, even when already called
+        # from the engine thread so _quit's return code does break
+        # the thread out of its main loop.
+        self._queue.put((self._quit, (code,), {}))
 
-    @with_lock
-    def machine_specific_options(self, machine_type):
-        return self._config.get_machine_specific_options(machine_type)
+    def restart(self):
+        self.quit(-1)
 
-    @with_lock
-    def system_keymap(self, machine_type, system_name):
-        return self._config.get_system_keymap(machine_type, system_name)
+    def join(self):
+        return self.code
 
     @with_lock
     def lookup(self, translation):
@@ -393,6 +478,14 @@ class StenoEngine(object):
     @with_lock
     def raw_lookup(self, translation):
         return self._dictionaries.raw_lookup(translation)
+
+    @with_lock
+    def lookup_from_all(self, translation):
+        return self._dictionaries.lookup_from_all(translation)
+
+    @with_lock
+    def raw_lookup_from_all(self, translation):
+        return self._dictionaries.raw_lookup_from_all(translation)
 
     @with_lock
     def reverse_lookup(self, translation):
@@ -414,7 +507,7 @@ class StenoEngine(object):
 
     @with_lock
     def get_suggestions(self, translation):
-        return self._suggestions.find(translation)
+        return Suggestions(self._dictionaries).find(translation)
 
     @property
     @with_lock
@@ -446,12 +539,11 @@ class StenoEngine(object):
         self._formatter.start_capitalized = state.capitalize
 
     @with_lock
-    def add_translation(self, strokes, translation, dictionary=None):
-        if dictionary is None:
-            dictionary = self._dictionaries.dicts[0].get_path()
-        self._dictionaries.set(strokes, translation,
-                               dictionary=dictionary)
-        self._dictionaries.save(path_list=(dictionary,))
+    def add_translation(self, strokes, translation, dictionary_path=None):
+        if dictionary_path is None:
+            dictionary_path = self._dictionaries.first_writable().path
+        self._dictionaries.set(strokes, translation, path=dictionary_path)
+        self._dictionaries.save(path_list=(dictionary_path,))
 
     @property
     @with_lock
